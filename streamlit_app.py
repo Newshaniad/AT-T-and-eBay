@@ -38,14 +38,21 @@ This game simulates a legal settlement negotiation between eBay and AT&T.
 """)
 
 # Firebase credentials and config
-firebase_key = st.secrets["firebase_key"]
-database_url = st.secrets["database_url"]
-
-if not firebase_admin._apps:
-    cred = credentials.Certificate(json.loads(firebase_key))
-    firebase_admin.initialize_app(cred, {
-        'databaseURL': database_url
-    })
+try:
+    firebase_key = st.secrets["firebase_key"]
+    database_url = st.secrets["database_url"]
+    
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(json.loads(firebase_key))
+        firebase_admin.initialize_app(cred, {
+            'databaseURL': database_url
+        })
+    FIREBASE_ENABLED = True
+except KeyError:
+    st.error("🔥 Firebase secrets not configured. Please set up firebase_key and database_url in Streamlit secrets.")
+    st.info("For local testing, you can run the local version: lawsuit_game_local.py")
+    FIREBASE_ENABLED = False
+    st.stop()
 
 # Password protection
 admin_password = st.text_input("Admin Password (for game management):", type="password")
@@ -241,17 +248,84 @@ if name:
                         st.success(f"✅ You chose {strategy_short} strategy and offered a {offer} settlement!")
                         st.rerun()
                 else:
-                    st.info("✅ You have submitted your strategy. Waiting for AT&T's response...")
+                    # Wait for AT&T's response with polling
+                    with st.spinner("⏳ Waiting for AT&T to respond..."):
+                        max_wait = 10  # seconds
+                        for _ in range(max_wait):
+                            fresh_data = game_ref.get()
+                            if fresh_data and fresh_data.get("att_response_made", False):
+                                att_response = fresh_data.get("att_response", "Unknown")
+                                st.success(f"✅ AT&T chose to {att_response}!")
+                                st.rerun()
+                                break
+                            time.sleep(1)
+                        else:
+                            st.warning("⌛ AT&T hasn't responded yet. Auto-simulating...")
+                            # Auto-simulate AT&T response after timeout
+                            ebay_offer = game_data.get("ebay_offer", "Stingy")
+                            
+                            if ebay_offer == "Generous":
+                                att_response = "Accept"
+                            else:  # Stingy offer
+                                # Use Nash equilibrium probability (q = 2/5 = 40%)
+                                att_response = "Accept" if random.random() < 0.4 else "Reject"
+                            
+                            game_ref.update({
+                                "att_response": att_response,
+                                "att_response_made": True,
+                                "simulated_att": True,
+                                "timestamp": time.time()
+                            })
+                            st.success(f"🤖 AT&T (AI) chose to {att_response}!")
+                            st.rerun()
             
             elif role == "AT&T":
                 st.markdown("### You are AT&T")
                 
-                # Wait for eBay's offer
+                # Wait for eBay's offer with polling
                 if not game_data.get("ebay_moves_made", False):
-                    st.info("⏳ Waiting for eBay to make their offer...")
+                    with st.spinner("⏳ Waiting for eBay to make their offer..."):
+                        max_wait = 10  # seconds
+                        for _ in range(max_wait):
+                            fresh_data = game_ref.get()
+                            if fresh_data and fresh_data.get("ebay_moves_made", False):
+                                ebay_offer = fresh_data.get("ebay_offer", "Unknown")
+                                st.success(f"✅ eBay has offered a {ebay_offer} settlement!")
+                                st.rerun()
+                                break
+                            time.sleep(1)
+                        else:
+                            st.warning("⌛ eBay hasn't made their offer yet. Auto-simulating...")
+                            # Auto-simulate eBay's decision after timeout
+                            ebay_is_guilty = random.random() < 0.25  # 25% chance
+                            
+                            # eBay chooses strategy based on Nash equilibrium (p = 3/7)
+                            strategy_short = "SS" if random.random() < 3/7 else "SG"
+                            
+                            # Determine offer based on strategy
+                            if strategy_short == "SS":
+                                offer = "Stingy"
+                            else:  # SG strategy
+                                offer = "Generous" if ebay_is_guilty else "Stingy"
+                            
+                            # Update game with simulated eBay moves
+                            game_ref.update({
+                                "ebay_is_guilty": ebay_is_guilty,
+                                "ebay_strategy": strategy_short,
+                                "ebay_offer": offer,
+                                "ebay_moves_made": True,
+                                "simulated_ebay": True,
+                                "timestamp": time.time()
+                            })
+                            st.success(f"🤖 eBay (AI) chose {strategy_short} strategy and offered {offer}!")
+                            st.rerun()
                 else:
                     ebay_offer = game_data.get("ebay_offer", "Unknown")
-                    st.info(f"📋 eBay has offered a **{ebay_offer}** settlement")
+                    ebay_simulated = game_data.get("simulated_ebay", False)
+                    if ebay_simulated:
+                        st.info(f"📋 eBay (AI) has offered a **{ebay_offer}** settlement")
+                    else:
+                        st.info(f"📋 eBay has offered a **{ebay_offer}** settlement")
                     
                     # Check if AT&T has responded
                     if not game_data.get("att_response_made", False):
