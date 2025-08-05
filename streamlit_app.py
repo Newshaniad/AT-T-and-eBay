@@ -492,4 +492,3 @@ elif expected_players > 0:
     st.info(f"⏳ Waiting for all participants to finish... ({completed_games * 2}/{expected_players} players completed)")
 else:
     st.info("📈 Admin needs to set the expected number of players to display results.")
-    
