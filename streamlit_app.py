@@ -9,33 +9,9 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 import base64
 
-st.set_page_config(page_title="⚖️ eBay vs AT&T Lawsuit Game")
+st.set_page_config(page_title="⚖️ eBay vs AT&T Classroom Game")
 
-st.title("⚖️ eBay vs AT&T Lawsuit Game Theory Simulation")
-
-# Game description
-st.markdown("""
-## Game Description
-This game simulates a legal settlement negotiation between eBay and AT&T.
-
-**The Setup:**
-- eBay may be **Guilty** (25% chance) or **Innocent** (75% chance)
-- eBay can offer either a **Generous** or **Stingy** settlement
-- AT&T can **Accept** or **Reject** the settlement offer
-- If AT&T rejects, both parties go to court (costly for both)
-
-**eBay's Strategies:**
-- **Pooling (SS)**: Always offer Stingy settlement regardless of guilt
-- **Separating (SG)**: Offer Stingy if innocent, Generous if guilty
-
-**Nash Equilibrium:**
-- eBay uses Pooling strategy with probability **p = 3/7** ≈ 42.86%
-- AT&T accepts Stingy offers with probability **q = 2/5** = 40%
-
-**Expected Payoffs at Equilibrium:**
-- eBay: -56 points
-- AT&T: 320/7 ≈ 45.71 points
-""")
+st.title("⚖️ eBay vs AT&T Lawsuit Game - Classroom Edition")
 
 # Firebase credentials and config
 try:
@@ -54,441 +30,506 @@ except KeyError:
     FIREBASE_ENABLED = False
     st.stop()
 
-# Password protection
-admin_password = st.text_input("Admin Password (for game management):", type="password")
+# Initialize session state
+if 'game_phase' not in st.session_state:
+    st.session_state.game_phase = 'story'
+if 'current_round' not in st.session_state:
+    st.session_state.current_round = 1
 
-if admin_password == "admin123":
-    st.header("🔒 Admin Section")
+# Admin section
+admin_password = st.text_input("Teacher Password:", type="password")
+
+if admin_password == "teacher123":
+    st.header("🎓 Teacher Control Panel")
     
-    # Set expected number of players
-    st.subheader("👥 Game Configuration")
-    current_expected = db.reference("lawsuit_expected_players").get() or 0
-    st.write(f"Current expected players: {current_expected}")
+    # Game phase control
+    st.subheader("📋 Control Game Phase")
+    phases = ['story', 'assign_roles', 'round_play', 'reveal_scores', 'mixing_strategies', 'wrap_up']
+    phase_names = ['Step 1: Tell Story', 'Step 2: Assign Roles', 'Step 3: Round Play', 
+                   'Step 4: Reveal & Score', 'Step 5: Mixing Strategies', 'Step 6: Wrap-Up']
     
-    new_expected_players = st.number_input(
-        "Set expected number of players:", 
-        min_value=0, 
-        max_value=100, 
-        value=current_expected,
-        step=2,
-        help="Must be an even number (players are paired as eBay vs AT&T)"
-    )
+    current_phase_idx = phases.index(st.session_state.game_phase)
     
-    if st.button("⚙ Update Expected Players"):
-        if new_expected_players % 2 == 0:
-            db.reference("lawsuit_expected_players").set(new_expected_players)
-            st.success(f"✅ Expected players set to {new_expected_players}")
-        else:
-            st.error("⚠ Number of players must be even (for pairing)")
-    
-    # Database cleanup
-    if st.button("🗑 Delete ALL Lawsuit Game Data"):
-        db.reference("lawsuit_games").delete()
-        db.reference("lawsuit_matches").delete()
-        db.reference("lawsuit_players").delete()
-        db.reference("lawsuit_expected_players").set(0)
-        st.success("🧹 ALL lawsuit game data deleted from Firebase.")
-
-if (db.reference("lawsuit_expected_players").get() or 0) <= 0:
-    st.stop()
-
-# Initialize game variables
-already_matched = False
-match_id = None
-role = None
-pair = None
-
-name = st.text_input("Enter your name to join the lawsuit game:")
-
-if name:
-    st.success(f"👋 Welcome, {name}!")
-
-    player_ref = db.reference(f"lawsuit_players/{name}")
-    player_data = player_ref.get()
-
-    if not player_data:
-        player_ref.set({
-            "joined": True,
-            "timestamp": time.time()
-        })
-        st.write("✅ Firebase is connected and you are registered.")
-
-    match_ref = db.reference("lawsuit_matches")
-    match_data = match_ref.get() or {}
-
-    # Check if player already matched
-    already_matched = False
-    for match_id, info in match_data.items():
-        if name in info.get("players", []):
-            role = "eBay" if info["players"][0] == name else "AT&T"
-            st.success(f"⚖️ Hello, {name}! You are playing as {role} in match {match_id}")
-            already_matched = True
-            break
-
-    if not already_matched:
-        # Check if all expected players have finished
-        expected_players_ref = db.reference("lawsuit_expected_players")
-        expected_players = expected_players_ref.get() or 0
-        all_games = db.reference("lawsuit_games").get() or {}
-        
-        completed_players = 0
-        for match_id, game_data in all_games.items():
-            if "completed" in game_data and game_data["completed"]:
-                completed_players += 2
-        
-        if expected_players > 0 and completed_players >= expected_players:
-            st.info("🎯 All games have been completed! No more matches are available.")
-            st.info("📊 Check the Game Summary section below to see the results.")
-        else:
-            # Get fresh data to avoid race conditions
-            players_data = db.reference("lawsuit_players").get() or {}
-            match_data = db.reference("lawsuit_matches").get() or {}
-            
-            unmatched = [p for p in players_data.keys()
-                         if not any(p in m.get("players", []) for m in match_data.values())
-                         and p != name]
-
-            if unmatched:
-                partner = unmatched[0]
-                pair = sorted([name, partner])
-                match_id = f"{pair[0]}_vs_{pair[1]}"
-                
-                # Double-check that match doesn't exist
-                existing_match = match_ref.child(match_id).get()
-                if not existing_match:
-                    match_ref.child(match_id).set({"players": pair})
-                    role = "eBay" if pair[0] == name else "AT&T"
-                    st.success(f"⚖️ Hello, {name}! You are playing as {role} in match {match_id}")
-                else:
-                    role = "eBay" if existing_match["players"][0] == name else "AT&T"
-                    st.success(f"⚖️ Hello, {name}! You are playing as {role} in match {match_id}")
-                    already_matched = True
-            else:
-                st.info("⏳ Waiting for another player to join...")
-                with st.spinner("Checking for match..."):
-                    timeout = 30
-                    for i in range(timeout):
-                        match_data = match_ref.get() or {}
-                        for match_id, info in match_data.items():
-                            if name in info.get("players", []):
-                                role = "eBay" if info["players"][0] == name else "AT&T"
-                                st.success(f"⚖️ Hello, {name}! You are playing as {role} in match {match_id}")
-                                already_matched = True
-                                st.rerun()
-                        time.sleep(2)
-
-    # Game Logic
-    if already_matched or role is not None:
-        match_id = match_id if already_matched else f"{pair[0]}_vs_{pair[1]}"
-        role = role if already_matched else ("eBay" if pair[0] == name else "AT&T")
-        game_ref = db.reference(f"lawsuit_games/{match_id}")
-
-        # Check if game is already completed
-        game_data = game_ref.get() or {}
-        if game_data.get("completed", False):
-            st.success("🎉 This game has been completed!")
-            
-            # Display results
-            ebay_guilt = "Guilty" if game_data.get("ebay_is_guilty", False) else "Innocent"
-            ebay_strategy = game_data.get("ebay_strategy", "Unknown")
-            ebay_offer = game_data.get("ebay_offer", "Unknown")
-            att_response = game_data.get("att_response", "Unknown")
-            ebay_payoff = game_data.get("ebay_payoff", 0)
-            att_payoff = game_data.get("att_payoff", 0)
-            
-            st.markdown(f"""
-            ### Game Results:
-            - **eBay was**: {ebay_guilt}
-            - **eBay's strategy**: {ebay_strategy}
-            - **eBay's offer**: {ebay_offer}
-            - **AT&T's response**: {att_response}
-            - **eBay's payoff**: {ebay_payoff}
-            - **AT&T's payoff**: {att_payoff}
-            """)
-        else:
-            # Start the game
-            st.subheader("🎮 Game in Progress")
-            
-            if role == "eBay":
-                st.markdown("### You are eBay")
-                
-                # Check if eBay has made their moves
-                if not game_data.get("ebay_moves_made", False):
-                    # Determine guilt (if not already set)
-                    if "ebay_is_guilty" not in game_data:
-                        ebay_is_guilty = random.random() < 0.25  # 25% chance
-                        game_ref.update({"ebay_is_guilty": ebay_is_guilty})
-                    else:
-                        ebay_is_guilty = game_data["ebay_is_guilty"]
-                    
-                    guilt_status = "Guilty" if ebay_is_guilty else "Innocent"
-                    st.info(f"🎯 You are: **{guilt_status}**")
-                    
-                    # Choose strategy
-                    strategy = st.radio(
-                        "Choose your strategy:",
-                        ["Pooling (SS) - Always offer Stingy", "Separating (SG) - Stingy if innocent, Generous if guilty"]
-                    )
-                    
-                    if st.button("Submit Strategy"):
-                        strategy_short = "SS" if "Pooling" in strategy else "SG"
-                        
-                        # Determine offer based on strategy
-                        if strategy_short == "SS":
-                            offer = "Stingy"
-                        else:  # SG strategy
-                            offer = "Generous" if ebay_is_guilty else "Stingy"
-                        
-                        game_ref.update({
-                            "ebay_strategy": strategy_short,
-                            "ebay_offer": offer,
-                            "ebay_moves_made": True,
-                            "timestamp": time.time()
-                        })
-                        st.success(f"✅ You chose {strategy_short} strategy and offered a {offer} settlement!")
-                        st.rerun()
-                else:
-                    # Wait for AT&T's response with polling
-                    with st.spinner("⏳ Waiting for AT&T to respond..."):
-                        max_wait = 10  # seconds
-                        for _ in range(max_wait):
-                            fresh_data = game_ref.get()
-                            if fresh_data and fresh_data.get("att_response_made", False):
-                                att_response = fresh_data.get("att_response", "Unknown")
-                                st.success(f"✅ AT&T chose to {att_response}!")
-                                st.rerun()
-                                break
-                            time.sleep(1)
-                        else:
-                            st.warning("⌛ AT&T hasn't responded yet. Auto-simulating...")
-                            # Auto-simulate AT&T response after timeout
-                            ebay_offer = game_data.get("ebay_offer", "Stingy")
-                            
-                            if ebay_offer == "Generous":
-                                att_response = "Accept"
-                            else:  # Stingy offer
-                                # Use Nash equilibrium probability (q = 2/5 = 40%)
-                                att_response = "Accept" if random.random() < 0.4 else "Reject"
-                            
-                            game_ref.update({
-                                "att_response": att_response,
-                                "att_response_made": True,
-                                "simulated_att": True,
-                                "timestamp": time.time()
-                            })
-                            st.success(f"🤖 AT&T (AI) chose to {att_response}!")
-                            st.rerun()
-            
-            elif role == "AT&T":
-                st.markdown("### You are AT&T")
-                
-                # Wait for eBay's offer with polling
-                if not game_data.get("ebay_moves_made", False):
-                    with st.spinner("⏳ Waiting for eBay to make their offer..."):
-                        max_wait = 10  # seconds
-                        for _ in range(max_wait):
-                            fresh_data = game_ref.get()
-                            if fresh_data and fresh_data.get("ebay_moves_made", False):
-                                ebay_offer = fresh_data.get("ebay_offer", "Unknown")
-                                st.success(f"✅ eBay has offered a {ebay_offer} settlement!")
-                                st.rerun()
-                                break
-                            time.sleep(1)
-                        else:
-                            st.warning("⌛ eBay hasn't made their offer yet. Auto-simulating...")
-                            # Auto-simulate eBay's decision after timeout
-                            ebay_is_guilty = random.random() < 0.25  # 25% chance
-                            
-                            # eBay chooses strategy based on Nash equilibrium (p = 3/7)
-                            strategy_short = "SS" if random.random() < 3/7 else "SG"
-                            
-                            # Determine offer based on strategy
-                            if strategy_short == "SS":
-                                offer = "Stingy"
-                            else:  # SG strategy
-                                offer = "Generous" if ebay_is_guilty else "Stingy"
-                            
-                            # Update game with simulated eBay moves
-                            game_ref.update({
-                                "ebay_is_guilty": ebay_is_guilty,
-                                "ebay_strategy": strategy_short,
-                                "ebay_offer": offer,
-                                "ebay_moves_made": True,
-                                "simulated_ebay": True,
-                                "timestamp": time.time()
-                            })
-                            st.success(f"🤖 eBay (AI) chose {strategy_short} strategy and offered {offer}!")
-                            st.rerun()
-                else:
-                    ebay_offer = game_data.get("ebay_offer", "Unknown")
-                    ebay_simulated = game_data.get("simulated_ebay", False)
-                    if ebay_simulated:
-                        st.info(f"📋 eBay (AI) has offered a **{ebay_offer}** settlement")
-                    else:
-                        st.info(f"📋 eBay has offered a **{ebay_offer}** settlement")
-                    
-                    # Check if AT&T has responded
-                    if not game_data.get("att_response_made", False):
-                        if ebay_offer == "Generous":
-                            st.success("💰 The offer is Generous - you automatically Accept!")
-                            game_ref.update({
-                                "att_response": "Accept",
-                                "att_response_made": True,
-                                "timestamp": time.time()
-                            })
-                            st.rerun()
-                        else:  # Stingy offer
-                            response = st.radio(
-                                "The offer is Stingy. What do you do?",
-                                ["Accept", "Reject (Go to Court)"]
-                            )
-                            
-                            if st.button("Submit Response"):
-                                response_short = "Accept" if response == "Accept" else "Reject"
-                                game_ref.update({
-                                    "att_response": response_short,
-                                    "att_response_made": True,
-                                    "timestamp": time.time()
-                                })
-                                st.success(f"✅ You chose to {response_short}!")
-                                st.rerun()
-                    else:
-                        att_response = game_data.get("att_response", "Unknown")
-                        st.info(f"✅ You chose to {att_response}")
-
-            # Calculate payoffs when both players have moved
-            if game_data.get("ebay_moves_made", False) and game_data.get("att_response_made", False) and not game_data.get("completed", False):
-                # Calculate payoffs
-                ebay_is_guilty = game_data.get("ebay_is_guilty", False)
-                ebay_offer = game_data.get("ebay_offer", "Stingy")
-                att_response = game_data.get("att_response", "Accept")
-                
-                # Payoff matrix based on the game description
-                if ebay_offer == "Generous" and att_response == "Accept":
-                    if ebay_is_guilty:
-                        ebay_payoff = -100  # Guilty and generous settlement
-                        att_payoff = 100    # Good deal for AT&T
-                    else:
-                        ebay_payoff = -80   # Innocent but generous settlement
-                        att_payoff = 100    # Good deal for AT&T
-                elif ebay_offer == "Stingy" and att_response == "Accept":
-                    if ebay_is_guilty:
-                        ebay_payoff = -20   # Guilty but only stingy settlement
-                        att_payoff = 20     # Modest deal for AT&T
-                    else:
-                        ebay_payoff = -10   # Innocent and stingy settlement
-                        att_payoff = 20     # Modest deal for AT&T
-                else:  # Reject - go to court
-                    court_costs = 50
-                    if ebay_is_guilty:
-                        ebay_payoff = -150 - court_costs  # Lose case and pay court costs
-                        att_payoff = 150 - court_costs    # Win case but pay court costs
-                    else:
-                        ebay_payoff = 50 - court_costs    # Win case but pay court costs
-                        att_payoff = -50 - court_costs    # Lose case and pay court costs
-                
-                # Update game with final results
-                game_ref.update({
-                    "ebay_payoff": ebay_payoff,
-                    "att_payoff": att_payoff,
-                    "completed": True,
-                    "final_timestamp": time.time()
-                })
-                
-                st.success("🎉 Game Complete!")
-                guilt_status = "Guilty" if ebay_is_guilty else "Innocent"
-                st.markdown(f"""
-                ### Final Results:
-                - **eBay was**: {guilt_status}
-                - **eBay's offer**: {ebay_offer}
-                - **AT&T's response**: {att_response}
-                - **eBay's payoff**: {ebay_payoff}
-                - **AT&T's payoff**: {att_payoff}
-                """)
-
-# Game Summary Section
-st.header("📊 Game Summary")
-
-expected_players = db.reference("lawsuit_expected_players").get() or 0
-all_games = db.reference("lawsuit_games").get() or {}
-
-completed_games = 0
-total_ebay_payoff = 0
-total_att_payoff = 0
-strategy_counts = {"SS": 0, "SG": 0}
-response_counts = {"Accept": 0, "Reject": 0}
-guilt_outcomes = {"Guilty": 0, "Innocent": 0}
-
-for match_id, game_data in all_games.items():
-    if game_data.get("completed", False):
-        completed_games += 1
-        total_ebay_payoff += game_data.get("ebay_payoff", 0)
-        total_att_payoff += game_data.get("att_payoff", 0)
-        
-        strategy = game_data.get("ebay_strategy", "Unknown")
-        if strategy in strategy_counts:
-            strategy_counts[strategy] += 1
-            
-        response = game_data.get("att_response", "Unknown")
-        if response in response_counts:
-            response_counts[response] += 1
-            
-        guilt = "Guilty" if game_data.get("ebay_is_guilty", False) else "Innocent"
-        if guilt in guilt_outcomes:
-            guilt_outcomes[guilt] += 1
-
-if expected_players > 0 and completed_games * 2 >= expected_players:
-    st.success(f"✅ All {expected_players} players completed the game!")
-    
-    # Display statistics
-    col1, col2 = st.columns(2)
-    
+    col1, col2, col3 = st.columns(3)
     with col1:
-        st.subheader("Strategy Distribution")
-        if completed_games > 0:
-            fig, ax = plt.subplots()
-            strategies = list(strategy_counts.keys())
-            counts = list(strategy_counts.values())
-            ax.bar(strategies, counts)
-            ax.set_title("eBay Strategy Choices")
-            ax.set_ylabel("Count")
-            st.pyplot(fig)
+        if st.button("⬅️ Previous Phase") and current_phase_idx > 0:
+            st.session_state.game_phase = phases[current_phase_idx - 1]
+            st.rerun()
     
     with col2:
-        st.subheader("AT&T Responses to Stingy Offers")
-        stingy_responses = {"Accept": 0, "Reject": 0}
-        for game_data in all_games.values():
-            if game_data.get("completed", False) and game_data.get("ebay_offer") == "Stingy":
-                response = game_data.get("att_response", "Unknown")
-                if response in stingy_responses:
-                    stingy_responses[response] += 1
-        
-        if sum(stingy_responses.values()) > 0:
-            fig, ax = plt.subplots()
-            responses = list(stingy_responses.keys())
-            counts = list(stingy_responses.values())
-            ax.bar(responses, counts)
-            ax.set_title("AT&T Responses to Stingy Offers")
-            ax.set_ylabel("Count")
-            st.pyplot(fig)
+        st.write(f"**Current: {phase_names[current_phase_idx]}**")
     
-    # Average payoffs
-    if completed_games > 0:
-        avg_ebay = total_ebay_payoff / completed_games
-        avg_att = total_att_payoff / completed_games
-        
-        st.subheader("Average Payoffs")
-        st.write(f"eBay average payoff: {avg_ebay:.2f}")
-        st.write(f"AT&T average payoff: {avg_att:.2f}")
-        
-        st.subheader("Nash Equilibrium Comparison")
-        st.write("**Theoretical Nash Equilibrium:**")
-        st.write("- eBay expected payoff: -56")
-        st.write("- AT&T expected payoff: 45.71")
-        st.write("- eBay should use Pooling (SS) 3/7 ≈ 42.86% of the time")
-        st.write("- AT&T should Accept Stingy offers 2/5 = 40% of the time")
+    with col3:
+        if st.button("➡️ Next Phase") and current_phase_idx < len(phases) - 1:
+            st.session_state.game_phase = phases[current_phase_idx + 1]
+            st.rerun()
+    
+    # Round control
+    st.subheader("🔄 Round Control")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("🔄 Start New Round"):
+            st.session_state.current_round += 1
+            # Clear round data
+            db.reference(f"classroom_round_{st.session_state.current_round}").delete()
+            st.success(f"Started Round {st.session_state.current_round}")
+    
+    with col2:
+        st.write(f"**Current Round: {st.session_state.current_round}**")
+    
+    with col3:
+        if st.button("📊 Show Round Results"):
+            st.session_state.show_results = True
+    
+    # Data management
+    st.subheader("🗂️ Data Management")
+    if st.button("🗑️ Clear All Game Data"):
+        for i in range(1, 11):  # Clear up to 10 rounds
+            db.reference(f"classroom_round_{i}").delete()
+        db.reference("classroom_players").delete()
+        st.success("All game data cleared!")
+    
+    st.divider()
 
-elif expected_players > 0:
-    st.info(f"⏳ Waiting for all participants to finish... ({completed_games * 2}/{expected_players} players completed)")
-else:
-    st.info("📈 Admin needs to set the expected number of players to display results.")
+# Main game phases
+if st.session_state.game_phase == 'story':
+    st.header("📖 Step 1: The Story")
+    st.markdown("""
+    ## 🎭 The Legal Drama
+    
+    **AT&T sues eBay for patent infringement.**
+    
+    Sometimes eBay is **guilty**, sometimes **innocent**.
+    
+    eBay can make a **generous offer** or a **stingy offer** to settle out of court.
+    
+    - If it's **generous**, AT&T always takes it (who wouldn't want more money?).
+    - If it's **stingy**, AT&T has a choice: **take it** or **reject and go to court**.
+    - **Court costs both sides money** - lawyers are expensive!
+    
+    ---
+    
+    *Don't worry about probabilities or equations yet - just think about the choices each side faces.*
+    """)
+    
+    if admin_password == "teacher123":
+        st.info("👨‍🏫 **Teacher Note:** This is the narrative phase. Students should understand the basic situation before seeing any math.")
+
+elif st.session_state.game_phase == 'assign_roles':
+    st.header("🎭 Step 2: Choose Your Role")
+    
+    name = st.text_input("Enter your name:")
+    
+    if name:
+        # Register player
+        player_ref = db.reference(f"classroom_players/{name}")
+        player_data = player_ref.get()
+        
+        if not player_data:
+            role = st.selectbox("Choose your role:", ["eBay", "AT&T"])
+            
+            if st.button("Join Game"):
+                # Assign guilt status if eBay (25% chance of guilty)
+                guilt_status = None
+                card_color = None
+                if role == "eBay":
+                    is_guilty = random.random() < 0.25
+                    guilt_status = "Guilty" if is_guilty else "Innocent"
+                    card_color = "🔴 Red Card" if is_guilty else "🔵 Blue Card"
+                
+                player_ref.set({
+                    "name": name,
+                    "role": role,
+                    "guilt_status": guilt_status,
+                    "card_color": card_color,
+                    "timestamp": time.time()
+                })
+                st.success(f"✅ You are registered as {role}!")
+                if role == "eBay":
+                    st.success(f"🎴 You drew: {card_color} - You are {guilt_status}")
+                st.rerun()
+        else:
+            role = player_data["role"]
+            st.success(f"✅ Welcome back, {name}! You are {role}")
+            if role == "eBay":
+                st.info(f"🎴 Your card: {player_data['card_color']} - You are {player_data['guilt_status']}")
+    
+    # Show current players
+    if admin_password == "teacher123":
+        st.subheader("👥 Current Players")
+        players = db.reference("classroom_players").get() or {}
+        ebay_players = [p for p in players.values() if p["role"] == "eBay"]
+        att_players = [p for p in players.values() if p["role"] == "AT&T"]
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"**eBay Players ({len(ebay_players)}):**")
+            for player in ebay_players:
+                guilt = player.get("guilt_status", "Unknown")
+                st.write(f"- {player['name']} ({guilt})")
+        
+        with col2:
+            st.write(f"**AT&T Players ({len(att_players)}):**")
+            for player in att_players:
+                st.write(f"- {player['name']}")
+
+elif st.session_state.game_phase == 'round_play':
+    st.header(f"🎮 Step 3: Round {st.session_state.current_round} - Make Your Moves")
+    
+    name = st.text_input("Enter your name:")
+    
+    if name:
+        player_ref = db.reference(f"classroom_players/{name}")
+        player_data = player_ref.get()
+        
+        if not player_data:
+            st.error("❌ You need to register first! Go back to Step 2.")
+        else:
+            role = player_data["role"]
+            round_ref = db.reference(f"classroom_round_{st.session_state.current_round}/{name}")
+            round_data = round_ref.get()
+            
+            if role == "eBay":
+                guilt_status = player_data["guilt_status"]
+                st.info(f"🎴 You are: **{guilt_status}**")
+                
+                if not round_data:
+                    if guilt_status == "Innocent":
+                        st.warning("⚠️ **Rule**: As an innocent party, you cannot make a Generous offer (it would look suspicious!)")
+                        offer = st.radio("Choose your offer:", ["Stingy"])
+                    else:  # Guilty
+                        offer = st.radio("Choose your offer:", ["Generous", "Stingy"])
+                    
+                    if st.button("Submit Offer"):
+                        round_ref.set({
+                            "role": role,
+                            "guilt_status": guilt_status,
+                            "offer": offer,
+                            "timestamp": time.time()
+                        })
+                        st.success(f"✅ You offered a {offer} settlement!")
+                        st.rerun()
+                else:
+                    st.success(f"✅ You already submitted: {round_data['offer']} offer")
+            
+            elif role == "AT&T":
+                if not round_data:
+                    st.info("👀 Waiting to see eBay offers...")
+                    
+                    # Show available offers to respond to
+                    round_offers = db.reference(f"classroom_round_{st.session_state.current_round}").get() or {}
+                    ebay_offers = {name: data for name, data in round_offers.items() 
+                                 if data.get("role") == "eBay" and "offer" in data}
+                    
+                    if ebay_offers:
+                        st.subheader("📋 eBay Offers Available:")
+                        selected_ebay = st.selectbox("Choose an eBay player to respond to:", 
+                                                   list(ebay_offers.keys()))
+                        
+                        if selected_ebay:
+                            offer = ebay_offers[selected_ebay]["offer"]
+                            st.info(f"💼 {selected_ebay} offered a **{offer}** settlement")
+                            
+                            if offer == "Generous":
+                                st.success("💰 It's generous! You automatically Accept!")
+                                response = "Accept"
+                                auto_accept = True
+                            else:  # Stingy
+                                response = st.radio("What do you do?", ["Accept", "Reject (Go to Court)"])
+                                auto_accept = False
+                            
+                            if st.button("Submit Response") or auto_accept:
+                                response_final = "Accept" if response == "Accept" else "Reject"
+                                round_ref.set({
+                                    "role": role,
+                                    "responding_to": selected_ebay,
+                                    "ebay_offer": offer,
+                                    "response": response_final,
+                                    "timestamp": time.time()
+                                })
+                                st.success(f"✅ You chose to {response_final}!")
+                                st.rerun()
+                    else:
+                        st.info("⏳ No eBay offers yet. Waiting for eBay players to make their moves...")
+                else:
+                    st.success(f"✅ You responded to {round_data['responding_to']}: {round_data['response']}")
+
+elif st.session_state.game_phase == 'reveal_scores':
+    st.header(f"📊 Step 4: Round {st.session_state.current_round} Results")
+    
+    # Show payoff table first
+    st.subheader("💰 Payoff Table")
+    payoff_data = [
+        ["Outcome", "eBay Payoff", "AT&T Payoff"],
+        ["Guilty + Generous + Accept", "-100", "+100"],
+        ["Guilty + Stingy + Accept", "-20", "+20"],
+        ["Guilty + Stingy + Reject", "-200", "+100"],
+        ["Innocent + Generous + Accept", "-80", "+100"],
+        ["Innocent + Stingy + Accept", "-10", "+20"],
+        ["Innocent + Stingy + Reject", "0", "-100"]
+    ]
+    
+    df = pd.DataFrame(payoff_data[1:], columns=payoff_data[0])
+    st.table(df)
+    
+    # Show round results
+    round_data = db.reference(f"classroom_round_{st.session_state.current_round}").get() or {}
+    
+    if round_data:
+        st.subheader(f"🎯 Round {st.session_state.current_round} Outcomes:")
+        
+        # Match eBay and AT&T responses
+        ebay_players = {name: data for name, data in round_data.items() if data.get("role") == "eBay"}
+        att_responses = {name: data for name, data in round_data.items() if data.get("role") == "AT&T"}
+        
+        results = []
+        for att_name, att_data in att_responses.items():
+            ebay_name = att_data.get("responding_to")
+            if ebay_name in ebay_players:
+                ebay_data = ebay_players[ebay_name]
+                
+                # Calculate payoffs
+                guilt = ebay_data["guilt_status"]
+                offer = ebay_data["offer"]
+                response = att_data["response"]
+                
+                if guilt == "Guilty":
+                    if offer == "Generous" and response == "Accept":
+                        ebay_payoff, att_payoff = -100, 100
+                    elif offer == "Stingy" and response == "Accept":
+                        ebay_payoff, att_payoff = -20, 20
+                    else:  # Stingy + Reject
+                        ebay_payoff, att_payoff = -200, 100
+                else:  # Innocent
+                    if offer == "Generous" and response == "Accept":
+                        ebay_payoff, att_payoff = -80, 100
+                    elif offer == "Stingy" and response == "Accept":
+                        ebay_payoff, att_payoff = -10, 20
+                    else:  # Stingy + Reject
+                        ebay_payoff, att_payoff = 0, -100
+                
+                results.append({
+                    "eBay Player": ebay_name,
+                    "AT&T Player": att_name,
+                    "eBay Status": guilt,
+                    "Offer": offer,
+                    "Response": response,
+                    "eBay Payoff": ebay_payoff,
+                    "AT&T Payoff": att_payoff
+                })
+        
+        if results:
+            results_df = pd.DataFrame(results)
+            st.table(results_df)
+            
+            # Summary statistics
+            st.subheader("📈 Round Summary")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                generous_count = len([r for r in results if r["Offer"] == "Generous"])
+                st.metric("Generous Offers", generous_count)
+            with col2:
+                accept_count = len([r for r in results if r["Response"] == "Accept"])
+                st.metric("Accepted Offers", accept_count)
+            with col3:
+                court_count = len([r for r in results if r["Response"] == "Reject"])
+                st.metric("Went to Court", court_count)
+        else:
+            st.info("No completed matches in this round yet.")
+    else:
+        st.info("No data for this round yet.")
+
+elif st.session_state.game_phase == 'mixing_strategies':
+    st.header("🎲 Step 5: Mixed Strategies")
+    
+    st.markdown("""
+    ## 🤔 What You've Learned So Far
+    
+    After playing several rounds, you might notice:
+    - **eBay** sometimes wants to "pool" (always be stingy) or "separate" (generous when guilty)
+    - **AT&T** sometimes wants to accept stingy offers, sometimes reject
+    
+    ## 🎯 The Challenge
+    
+    Can you find the **mixed strategy** where neither side wants to change their approach?
+    
+    This is called a **Nash Equilibrium** - where everyone is happy with their strategy given what others are doing.
+    """)
+    
+    # Show theoretical equilibrium
+    st.subheader("🧮 The Theory Says...")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.info("""
+        **eBay's Optimal Mix:**
+        - Use Pooling (always stingy): **3/7 ≈ 42.86%**
+        - Use Separating: **4/7 ≈ 57.14%**
+        """)
+    with col2:
+        st.info("""
+        **AT&T's Optimal Mix:**
+        - Accept Stingy offers: **2/5 = 40%**
+        - Reject Stingy offers: **3/5 = 60%**
+        """)
+    
+    # Compare with actual results
+    if st.button("📊 Compare with Your Results"):
+        all_rounds_data = []
+        for round_num in range(1, st.session_state.current_round + 1):
+            round_data = db.reference(f"classroom_round_{round_num}").get() or {}
+            for name, data in round_data.items():
+                if data.get("role") == "eBay":
+                    # Determine strategy
+                    guilt = data["guilt_status"]
+                    offer = data["offer"]
+                    if guilt == "Innocent" and offer == "Stingy":
+                        strategy = "Separating"
+                    elif guilt == "Guilty" and offer == "Generous":
+                        strategy = "Separating"
+                    else:
+                        strategy = "Pooling"
+                    
+                    all_rounds_data.append({
+                        "Round": round_num,
+                        "Player": name,
+                        "Role": "eBay",
+                        "Strategy": strategy,
+                        "Offer": offer,
+                        "Guilt": guilt
+                    })
+                elif data.get("role") == "AT&T" and data.get("ebay_offer") == "Stingy":
+                    all_rounds_data.append({
+                        "Round": round_num,
+                        "Player": name,
+                        "Role": "AT&T",
+                        "Response": data["response"],
+                        "Offer_Type": "Stingy"
+                    })
+        
+        if all_rounds_data:
+            # Calculate actual percentages
+            ebay_data = [d for d in all_rounds_data if d["Role"] == "eBay"]
+            att_stingy_data = [d for d in all_rounds_data if d["Role"] == "AT&T" and d["Offer_Type"] == "Stingy"]
+            
+            if ebay_data:
+                pooling_count = len([d for d in ebay_data if d["Strategy"] == "Pooling"])
+                pooling_pct = pooling_count / len(ebay_data) * 100
+                
+                st.subheader("🎯 Your Class Results vs Theory")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("eBay Pooling Strategy", f"{pooling_pct:.1f}%", f"Theory: 42.9%")
+                
+                if att_stingy_data:
+                    accept_count = len([d for d in att_stingy_data if d["Response"] == "Accept"])
+                    accept_pct = accept_count / len(att_stingy_data) * 100
+                    with col2:
+                        st.metric("AT&T Accept Stingy", f"{accept_pct:.1f}%", f"Theory: 40%")
+
+elif st.session_state.game_phase == 'wrap_up':
+    st.header("🎓 Step 6: Wrap-Up & Insights")
+    
+    st.markdown("""
+    ## 🧠 What You've Discovered
+    
+    Through playing this game, you've experienced:
+    
+    ### 1. **Semi-Separating Equilibrium**
+    - eBay can't always separate (guilty=generous, innocent=stingy) because AT&T would learn too much
+    - eBay can't always pool (always stingy) because then guilty parties get away too easily
+    - The solution: **mix strategies** to keep the other side guessing!
+    
+    ### 2. **Belief Updating (Bayes' Rule)**
+    - When AT&T sees a **Stingy** offer, what's the chance eBay is guilty?
+    - **Surprise**: It's only **12.5%**! Most stingy offers come from innocent parties.
+    
+    ### 3. **Nash Equilibrium in Practice**
+    - Your class results should be close to the theoretical prediction
+    - eBay: 42.9% pooling strategy
+    - AT&T: 40% acceptance of stingy offers
+    """)
+    
+    # Bayesian updating calculation
+    st.subheader("🔍 Belief Updating Exercise")
+    st.markdown("""
+    **Question**: If you see a Stingy offer, what's the probability eBay is guilty?
+    
+    **Answer**: Using Bayes' Rule...
+    - P(Guilty) = 25% (prior)
+    - P(Stingy|Guilty) in equilibrium ≈ 43% (pooling probability)  
+    - P(Stingy|Innocent) = 100% (innocent always offers stingy)
+    
+    **Result**: P(Guilty|Stingy) = **12.5%**
+    
+    *This means even when you see a stingy offer, eBay is probably innocent!*
+    """)
+    
+    # Final class statistics
+    st.subheader("📊 Final Class Statistics")
+    
+    # Aggregate all rounds
+    total_games = 0
+    total_ebay_payoff = 0
+    total_att_payoff = 0
+    all_outcomes = []
+    
+    for round_num in range(1, st.session_state.current_round + 1):
+        round_data = db.reference(f"classroom_round_{round_num}").get() or {}
+        att_responses = {name: data for name, data in round_data.items() if data.get("role") == "AT&T"}
+        
+        for att_name, att_data in att_responses.items():
+            ebay_name = att_data.get("responding_to")
+            if ebay_name in round_data:
+                ebay_data = round_data[ebay_name]
+                guilt = ebay_data["guilt_status"]
+                offer = ebay_data["offer"]
+                response = att_data["response"]
+                
+                # Calculate payoffs (same logic as before)
+                if guilt == "Guilty":
+                    if offer == "Generous" and response == "Accept":
+                        ebay_payoff, att_payoff = -100, 100
+                    elif offer == "Stingy" and response == "Accept":
+                        ebay_payoff, att_payoff = -20, 20
+                    else:
+                        ebay_payoff, att_payoff = -200, 100
+                else:
+                    if offer == "Generous" and response == "Accept":
+                        ebay_payoff, att_payoff = -80, 100
+                    elif offer == "Stingy" and response == "Accept":
+                        ebay_payoff, att_payoff = -10, 20
+                    else:
+                        ebay_payoff, att_payoff = 0, -100
+                
+                total_games += 1
+                total_ebay_payoff += ebay_payoff
+                total_att_payoff += att_payoff
+                all_outcomes.append({
+                    "guilt": guilt,
+                    "offer": offer,
+                    "response": response
+                })
+    
+    if total_games > 0:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Games Played", total_games)
+        with col2:
+            avg_ebay = total_ebay_payoff / total_games
+            st.metric("eBay Avg Payoff", f"{avg_ebay:.1f}", "Theory: -56")
+        with col3:
+            avg_att = total_att_payoff / total_games
+            st.metric("AT&T Avg Payoff", f"{avg_att:.1f}", "Theory: 45.7")
+    
+    st.success("🎉 Congratulations! You've experienced game theory in action!")
+
+# Show current game state for all users
+st.sidebar.header("🎮 Game Status")
+st.sidebar.write(f"**Phase**: {st.session_state.game_phase.replace('_', ' ').title()}")
+st.sidebar.write(f"**Round**: {st.session_state.current_round}")
+
+# Navigation for students
+if admin_password != "teacher123":
+    st.sidebar.markdown("---")
+    st.sidebar.write("**For students**: Enter your name in each phase to participate!")
+    st.sidebar.write("**Teacher controls the game phases**")
