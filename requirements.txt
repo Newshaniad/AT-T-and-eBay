@@ -2,4 +2,3 @@ streamlit
 firebase-admin
 pandas
 matplotlib
-reportlab
