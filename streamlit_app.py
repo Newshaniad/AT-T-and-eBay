@@ -39,7 +39,7 @@ if 'current_round' not in st.session_state:
 # Admin section
 admin_password = st.text_input("Teacher Password:", type="password")
 
-if admin_password == "teacher123":
+if admin_password == "admin123":
     st.header("🎓 Teacher Control Panel")
     
     # Game phase control
