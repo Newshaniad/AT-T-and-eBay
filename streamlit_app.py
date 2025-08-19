@@ -1,4 +1,4 @@
-import streamlit as st 
+import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, db
 import json
@@ -306,13 +306,153 @@ if admin_password == "admin123":
             st.success("🧹 ALL game data cleared!")
             st.rerun()
     
-    # Auto-refresh control
+    # Auto-refresh control and show complete results
     if expected_players > 0 and completed_matches < (expected_players // 2):
         # Auto-refresh while game is active
         time.sleep(3)
         st.rerun()
     elif completed_matches >= (expected_players // 2) and expected_players > 0:
         st.success("🎉 All matches completed! Game finished.")
+        
+        # Show the same Summary Analysis that participants see
+        st.header("📊 Admin View: Summary Analysis - Class Results vs Game Theory")
+        
+        # Collect all results (same as participant view)
+        ebay_offers = []
+        att_responses = []
+        guilt_statuses = []
+        guilty_offers = []
+        innocent_offers = []
+        stingy_responses = []
+        
+        for match_data in all_matches.values():
+            if match_data and isinstance(match_data, dict) and "ebay_response" in match_data and "att_response" in match_data:
+                guilt = match_data["ebay_guilt"]
+                offer = match_data["ebay_response"]
+                response = match_data["att_response"]
+                
+                ebay_offers.append(offer)
+                att_responses.append(response)
+                guilt_statuses.append(guilt)
+                
+                # Separate by guilt status
+                if guilt == "Guilty":
+                    guilty_offers.append(offer)
+                else:
+                    innocent_offers.append(offer)
+                
+                # AT&T responses to stingy offers only
+                if offer == "Stingy":
+                    stingy_responses.append(response)
+        
+        # Show key strategic analysis (same as participants see)
+        st.subheader("🎯 Key Strategic Analysis")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            # % of guilty vs innocent choosing Stingy
+            if guilty_offers and innocent_offers:
+                guilty_stingy = len([o for o in guilty_offers if o == "Stingy"])
+                innocent_stingy = len([o for o in innocent_offers if o == "Stingy"])
+                
+                guilty_stingy_pct = guilty_stingy / len(guilty_offers) * 100
+                innocent_stingy_pct = innocent_stingy / len(innocent_offers) * 100
+                
+                fig, ax = plt.subplots(figsize=(8, 5))
+                categories = ['Guilty eBay', 'Innocent eBay']
+                percentages = [guilty_stingy_pct, innocent_stingy_pct]
+                colors = ['#e74c3c', '#2ecc71']
+                
+                bars = ax.bar(categories, percentages, color=colors, alpha=0.8)
+                ax.set_title("% Choosing Stingy Offer by eBay Type", fontsize=14, fontweight='bold')
+                ax.set_ylabel("Percentage (%)")
+                ax.set_ylim(0, 110)
+                
+                # Add value labels
+                for bar, pct in zip(bars, percentages):
+                    ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 2,
+                           f'{pct:.1f}%', ha='center', va='bottom', fontweight='bold')
+                
+                ax.grid(True, alpha=0.3)
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                st.info("Need both guilty and innocent players to show this analysis")
+        
+        with col2:
+            # % of AT&T accepting stingy offers
+            if stingy_responses:
+                accept_stingy = len([r for r in stingy_responses if r == "Accept"])
+                accept_pct = accept_stingy / len(stingy_responses) * 100
+                
+                fig, ax = plt.subplots(figsize=(8, 5))
+                categories = ['Accept', 'Reject']
+                accept_count = len([r for r in stingy_responses if r == "Accept"])
+                reject_count = len([r for r in stingy_responses if r == "Reject"])
+                
+                values = [accept_count, reject_count]
+                percentages_vals = [v/len(stingy_responses)*100 for v in values]
+                colors = ['#3498db', '#e74c3c']
+                
+                bars = ax.bar(categories, percentages_vals, color=colors, alpha=0.8)
+                ax.set_title("AT&T Responses to Stingy Offers", fontsize=14, fontweight='bold')
+                ax.set_ylabel("Percentage (%)")
+                ax.set_ylim(0, 110)
+                
+                # Add value labels
+                for bar, pct in zip(bars, percentages_vals):
+                    ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 2,
+                           f'{pct:.1f}%', ha='center', va='bottom', fontweight='bold')
+                
+                ax.grid(True, alpha=0.3)
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                st.info("No stingy offers made yet")
+        
+        # Game Theory Analysis (same as participants see)
+        st.subheader("🧮 Game Theory Predictions vs Your Class")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if stingy_responses:
+                accept_stingy_pct = len([r for r in stingy_responses if r == "Accept"]) / len(stingy_responses) * 100
+                st.metric("AT&T Accept Stingy Offers", f"{accept_stingy_pct:.1f}%", "Theory: 40%")
+            else:
+                st.metric("AT&T Accept Stingy Offers", "N/A", "Theory: 40%")
+        
+        with col2:
+            if guilty_offers:
+                guilty_stingy_pct = len([o for o in guilty_offers if o == "Stingy"]) / len(guilty_offers) * 100
+                st.metric("Guilty eBay Choose Stingy", f"{guilty_stingy_pct:.1f}%", "Theory: ~43%")
+            else:
+                st.metric("Guilty eBay Choose Stingy", "N/A", "Theory: ~43%")
+        
+        with col3:
+            if innocent_offers:
+                innocent_stingy_pct = len([o for o in innocent_offers if o == "Stingy"]) / len(innocent_offers) * 100
+                st.metric("Innocent eBay Choose Stingy", f"{innocent_stingy_pct:.1f}%", "Theory: 100%")
+            else:
+                st.metric("Innocent eBay Choose Stingy", "N/A", "Theory: 100%")
+        
+        # Bayesian Analysis (same as participants see)
+        st.subheader("🔍 Bayesian Analysis")
+        if stingy_responses:
+            accept_stingy_pct = len([r for r in stingy_responses if r == "Accept"]) / len(stingy_responses) * 100
+            st.info(f"""
+            **Key Insight**: When you see a **Stingy** offer, what's the probability eBay is guilty?
+            
+            **Your Class Results**: 
+            - {len(stingy_responses)} stingy offers were made
+            - AT&T accepted {len([r for r in stingy_responses if r == "Accept"])} of them ({accept_stingy_pct:.1f}%)
+            
+            **Theoretical Prediction**: 
+            - P(Guilty | Stingy Offer) ≈ 12.5% 
+            - Most stingy offers actually come from innocent parties!
+            """)
+        
+        st.success("🎉 **Dynamic Signaling Game Complete!** Students experienced Nash Equilibrium, Bayesian updating, and strategic signaling in action!")
+        
         if st.button("🔄 Manual Refresh"):
             st.rerun()
     elif st.button("🔄 Refresh Dashboard"):
