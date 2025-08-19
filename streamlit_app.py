@@ -312,7 +312,7 @@ if (db.reference("lawsuit_expected_players").get() or 0) <= 0:
     st.stop()
 
 # Game explanation
-st.header("📖 Simple Explanation of the Game")
+st.header("📖 Explanation of the Game")
 
 st.markdown("""
 This is a **dynamic signaling game** between two players:
