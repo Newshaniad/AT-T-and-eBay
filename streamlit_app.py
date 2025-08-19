@@ -312,7 +312,7 @@ if (db.reference("lawsuit_expected_players").get() or 0) <= 0:
     st.stop()
 
 # Game explanation
-st.header("📖 Explanation of the Game")
+st.header("📖 Simple Explanation of the Game")
 
 st.markdown("""
 This is a **dynamic signaling game** between two players:
@@ -390,11 +390,11 @@ if name:
     
     # Check if player already has role assigned
     existing_player = player_ref.get()
-    if "role" not in existing_player:
+    if not existing_player or "role" not in existing_player:
         # Auto-assign roles fairly
         current_players = db.reference("lawsuit_players").get() or {}
-        ebay_count = len([p for p in current_players.values() if p.get("role") == "eBay"])
-        att_count = len([p for p in current_players.values() if p.get("role") == "AT&T"])
+        ebay_count = len([p for p in current_players.values() if p and p.get("role") == "eBay"])
+        att_count = len([p for p in current_players.values() if p and p.get("role") == "AT&T"])
         
         # Assign role to balance teams
         if ebay_count < (expected_players // 2):
@@ -417,17 +417,29 @@ if name:
     
     # Display player role
     player_info = player_ref.get()
-    role = player_info["role"]
+    if not player_info:
+        st.error("Failed to retrieve player information. Please refresh the page.")
+        st.stop()
+    role = player_info.get("role")
     
     if role == "eBay":
-        guilt_status = player_info["guilt_status"]
-        card_color = player_info["card_color"]
+        guilt_status = player_info.get("guilt_status")
+        card_color = player_info.get("card_color")
         st.success(f"🏢 **You are eBay (the sender)**")
-        st.info(f"🎴 **Step 2 - Nature's Decision**: {card_color}")
-        st.write(f"**Your type is: {guilt_status}** (This information is private - AT&T doesn't know this)")
-    else:
+        if guilt_status and card_color:
+            st.info(f"🎴 **Step 2 - Nature's Decision**: {card_color}")
+            st.write(f"**Your type is: {guilt_status}** (This information is private - AT&T doesn't know this)")
+        else:
+            st.warning("Setting up your game info...")
+            time.sleep(1)
+            st.rerun()
+    elif role == "AT&T":
         st.success(f"📡 **You are AT&T (the receiver)**")
         st.info("🎴 You don't know whether eBay is guilty or innocent - you must infer from their offer!")
+    else:
+        st.warning("Setting up your role...")
+        time.sleep(1)
+        st.rerun()
     
     # Matching system
     matches_ref = db.reference("lawsuit_matches")
