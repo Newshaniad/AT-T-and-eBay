@@ -73,6 +73,152 @@ def plot_enhanced_percentage_bar(choices, labels, title, player_type):
     else:
         st.warning(f"⚠ No data available for {title}")
 
+# PDF generation function for admin
+def create_pdf_report():
+    """Create a comprehensive PDF report using matplotlib figures"""
+    from matplotlib.backends.backend_pdf import PdfPages
+    import tempfile
+    
+    # Create temporary PDF file
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+    
+    with PdfPages(temp_file.name) as pdf:
+        # Get all completed matches
+        all_matches = db.reference("lawsuit_matches").get() or {}
+        results_data = []
+        
+        for match_id, match_data in all_matches.items():
+            if "ebay_response" in match_data and "att_response" in match_data:
+                guilt = match_data["ebay_guilt"]
+                offer = match_data["ebay_response"]
+                response = match_data["att_response"]
+                
+                # Calculate payoffs with correct values
+                if guilt == "Guilty":
+                    if offer == "Generous" and response == "Accept":
+                        ebay_payoff, att_payoff = -200, 200
+                    elif offer == "Stingy" and response == "Accept":
+                        ebay_payoff, att_payoff = -20, 20
+                    else:  # Stingy + Reject (Trial)
+                        ebay_payoff, att_payoff = -320, 300
+                else:  # Innocent
+                    if offer == "Generous" and response == "Accept":
+                        ebay_payoff, att_payoff = 0, 0  # Shouldn't happen
+                    elif offer == "Stingy" and response == "Accept":
+                        ebay_payoff, att_payoff = -20, 20
+                    else:  # Stingy + Reject (Trial)
+                        ebay_payoff, att_payoff = 0, -20
+                
+                results_data.append({
+                    "Match_ID": match_id,
+                    "eBay_Player": match_data["ebay_player"],
+                    "ATT_Player": match_data["att_player"],
+                    "eBay_Status": guilt,
+                    "Offer": offer,
+                    "Response": response,
+                    "eBay_Payoff": ebay_payoff,
+                    "ATT_Payoff": att_payoff
+                })
+        
+        if results_data:
+            # Create summary page
+            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+            fig.suptitle('AT&T vs eBay Lawsuit Game - Complete Results', fontsize=20, fontweight='bold')
+            
+            # Collect data for charts
+            ebay_offers = [r["Offer"] for r in results_data]
+            att_responses = [r["Response"] for r in results_data]
+            guilt_statuses = [r["eBay_Status"] for r in results_data]
+            
+            # Chart 1: eBay Offers
+            offer_counts = pd.Series(ebay_offers).value_counts(normalize=True) * 100
+            ax1.bar(offer_counts.index, offer_counts.values, color=['#e74c3c', '#3498db'], alpha=0.8)
+            ax1.set_title('eBay Settlement Offers', fontweight='bold')
+            ax1.set_ylabel('Percentage (%)')
+            for i, v in enumerate(offer_counts.values):
+                ax1.text(i, v + 1, f'{v:.1f}%', ha='center', fontweight='bold')
+            ax1.grid(True, alpha=0.3)
+            
+            # Chart 2: AT&T Responses
+            response_counts = pd.Series(att_responses).value_counts(normalize=True) * 100
+            ax2.bar(response_counts.index, response_counts.values, color=['#3498db', '#e74c3c'], alpha=0.8)
+            ax2.set_title('AT&T Responses', fontweight='bold')
+            ax2.set_ylabel('Percentage (%)')
+            for i, v in enumerate(response_counts.values):
+                ax2.text(i, v + 1, f'{v:.1f}%', ha='center', fontweight='bold')
+            ax2.grid(True, alpha=0.3)
+            
+            # Chart 3: Guilt Distribution
+            guilt_counts = pd.Series(guilt_statuses).value_counts(normalize=True) * 100
+            ax3.bar(guilt_counts.index, guilt_counts.values, color=['#e74c3c', '#2ecc71'], alpha=0.8)
+            ax3.set_title('eBay Guilt Distribution', fontweight='bold')
+            ax3.set_ylabel('Percentage (%)')
+            for i, v in enumerate(guilt_counts.values):
+                ax3.text(i, v + 1, f'{v:.1f}%', ha='center', fontweight='bold')
+            ax3.grid(True, alpha=0.3)
+            
+            # Chart 4: Strategy Analysis
+            strategies = []
+            for r in results_data:
+                if r["eBay_Status"] == "Innocent" and r["Offer"] == "Stingy":
+                    strategies.append("Separating")
+                elif r["eBay_Status"] == "Guilty" and r["Offer"] == "Generous":
+                    strategies.append("Separating")
+                else:
+                    strategies.append("Pooling")
+            
+            if strategies:
+                strategy_counts = pd.Series(strategies).value_counts(normalize=True) * 100
+                ax4.bar(strategy_counts.index, strategy_counts.values, color=['#9b59b6', '#f39c12'], alpha=0.8)
+                ax4.set_title('eBay Strategy Analysis', fontweight='bold')
+                ax4.set_ylabel('Percentage (%)')
+                for i, v in enumerate(strategy_counts.values):
+                    ax4.text(i, v + 1, f'{v:.1f}%', ha='center', fontweight='bold')
+                ax4.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            pdf.savefig(fig, bbox_inches='tight', dpi=300)
+            plt.close(fig)
+            
+            # Create detailed results table page
+            fig, ax = plt.subplots(figsize=(16, 10))
+            ax.axis('tight')
+            ax.axis('off')
+            
+            # Create table data
+            table_data = [["Match ID", "eBay Player", "AT&T Player", "eBay Status", "Offer", "Response", "eBay Payoff", "AT&T Payoff"]]
+            for r in results_data:
+                table_data.append([
+                    r["Match_ID"], r["eBay_Player"], r["ATT_Player"],
+                    r["eBay_Status"], r["Offer"], r["Response"],
+                    str(r["eBay_Payoff"]), str(r["ATT_Payoff"])
+                ])
+            
+            table = ax.table(cellText=table_data[1:], colLabels=table_data[0],
+                           cellLoc='center', loc='center', bbox=[0, 0, 1, 1])
+            table.auto_set_font_size(False)
+            table.set_fontsize(9)
+            table.scale(1, 2)
+            
+            # Style the table
+            for i in range(len(table_data[0])):
+                table[(0, i)].set_facecolor('#4472C4')
+                table[(0, i)].set_text_props(weight='bold', color='white')
+            
+            ax.set_title('Detailed Game Results', fontsize=16, fontweight='bold', pad=20)
+            pdf.savefig(fig, bbox_inches='tight', dpi=300)
+            plt.close(fig)
+    
+    # Read the PDF file content
+    with open(temp_file.name, 'rb') as f:
+        pdf_content = f.read()
+    
+    # Clean up temp file
+    import os
+    os.unlink(temp_file.name)
+    
+    return pdf_content
+
 # Admin section
 admin_password = st.text_input("Admin Password:", type="password")
 
@@ -251,50 +397,62 @@ if admin_password == "admin123":
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("📊 Export Results (CSV)"):
+        if st.button("📄 Export Results (PDF)"):
             if completed_matches > 0:
-                results_data = []
-                for match_id, match_data in all_matches.items():
-                    if "ebay_response" in match_data and "att_response" in match_data:
-                        # Calculate payoffs with correct values
-                        guilt = match_data["ebay_guilt"]
-                        offer = match_data["ebay_response"]
-                        response = match_data["att_response"]
+                with st.spinner("Generating PDF report..."):
+                    try:
+                        pdf_content = create_pdf_report()
+                        st.download_button(
+                            label="📥 Download PDF Report",
+                            data=pdf_content,
+                            file_name="lawsuit_game_results.pdf",
+                            mime="application/pdf"
+                        )
+                        st.success("✅ PDF report generated successfully!")
+                    except Exception as e:
+                        st.error(f"Error generating PDF: {str(e)}")
+                        # Fallback to CSV if PDF fails
+                        results_data = []
+                        for match_id, match_data in all_matches.items():
+                            if "ebay_response" in match_data and "att_response" in match_data:
+                                guilt = match_data["ebay_guilt"]
+                                offer = match_data["ebay_response"]
+                                response = match_data["att_response"]
+                                
+                                if guilt == "Guilty":
+                                    if offer == "Generous" and response == "Accept":
+                                        ebay_payoff, att_payoff = -200, 200
+                                    elif offer == "Stingy" and response == "Accept":
+                                        ebay_payoff, att_payoff = -20, 20
+                                    else:  # Stingy + Reject (Trial)
+                                        ebay_payoff, att_payoff = -320, 300
+                                else:  # Innocent
+                                    if offer == "Generous" and response == "Accept":
+                                        ebay_payoff, att_payoff = 0, 0
+                                    elif offer == "Stingy" and response == "Accept":
+                                        ebay_payoff, att_payoff = -20, 20
+                                    else:  # Stingy + Reject (Trial)
+                                        ebay_payoff, att_payoff = 0, -20
+                                
+                                results_data.append({
+                                    "Match_ID": match_id,
+                                    "eBay_Player": match_data["ebay_player"],
+                                    "ATT_Player": match_data["att_player"],
+                                    "eBay_Status": guilt,
+                                    "Offer": offer,
+                                    "Response": response,
+                                    "eBay_Payoff": ebay_payoff,
+                                    "ATT_Payoff": att_payoff
+                                })
                         
-                        if guilt == "Guilty":
-                            if offer == "Generous" and response == "Accept":
-                                ebay_payoff, att_payoff = -200, 200
-                            elif offer == "Stingy" and response == "Accept":
-                                ebay_payoff, att_payoff = -20, 20
-                            else:  # Stingy + Reject (Trial)
-                                ebay_payoff, att_payoff = -320, 300
-                        else:  # Innocent
-                            if offer == "Generous" and response == "Accept":
-                                ebay_payoff, att_payoff = 0, 0  # Shouldn't happen
-                            elif offer == "Stingy" and response == "Accept":
-                                ebay_payoff, att_payoff = -20, 20
-                            else:  # Stingy + Reject (Trial)
-                                ebay_payoff, att_payoff = 0, -20
-                        
-                        results_data.append({
-                            "Match_ID": match_id,
-                            "eBay_Player": match_data["ebay_player"],
-                            "ATT_Player": match_data["att_player"],
-                            "eBay_Status": guilt,
-                            "Offer": offer,
-                            "Response": response,
-                            "eBay_Payoff": ebay_payoff,
-                            "ATT_Payoff": att_payoff
-                        })
-                
-                df = pd.DataFrame(results_data)
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download CSV",
-                    data=csv,
-                    file_name="lawsuit_game_results.csv",
-                    mime="text/csv"
-                )
+                        df = pd.DataFrame(results_data)
+                        csv = df.to_csv(index=False)
+                        st.download_button(
+                            label="📥 Download CSV (Fallback)",
+                            data=csv,
+                            file_name="lawsuit_game_results.csv",
+                            mime="text/csv"
+                        )
             else:
                 st.warning("No completed matches to export.")
     
@@ -824,6 +982,119 @@ if name:
         
         st.balloons()
         st.success("✅ Your match is complete! Thank you for playing.")
+        
+        # Add Summary Analysis for AT&T participants immediately after their match
+        if role == "AT&T":
+            st.header("📊 Step 6: Summary Analysis - Class Results vs Game Theory")
+            
+            # Get all completed matches for analysis
+            all_matches = db.reference("lawsuit_matches").get() or {}
+            completed_results = []
+            
+            for match_data in all_matches.values():
+                if "ebay_response" in match_data and "att_response" in match_data:
+                    completed_results.append({
+                        "guilt": match_data["ebay_guilt"],
+                        "offer": match_data["ebay_response"],
+                        "response": match_data["att_response"]
+                    })
+            
+            if len(completed_results) >= 1:
+                st.subheader("🎯 Key Strategic Insights")
+                
+                # Separate data by guilt status
+                guilty_offers = [r["offer"] for r in completed_results if r["guilt"] == "Guilty"]
+                innocent_offers = [r["offer"] for r in completed_results if r["guilt"] == "Innocent"]
+                stingy_responses = [r["response"] for r in completed_results if r["offer"] == "Stingy"]
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if guilty_offers and innocent_offers:
+                        guilty_stingy_pct = len([o for o in guilty_offers if o == "Stingy"]) / len(guilty_offers) * 100
+                        innocent_stingy_pct = len([o for o in innocent_offers if o == "Stingy"]) / len(innocent_offers) * 100
+                        
+                        fig, ax = plt.subplots(figsize=(8, 5))
+                        categories = ['Guilty eBay', 'Innocent eBay']
+                        percentages = [guilty_stingy_pct, innocent_stingy_pct]
+                        colors = ['#e74c3c', '#2ecc71']
+                        
+                        bars = ax.bar(categories, percentages, color=colors, alpha=0.8)
+                        ax.set_title("% Choosing Stingy by eBay Type", fontsize=14, fontweight='bold')
+                        ax.set_ylabel("Percentage (%)")
+                        ax.set_ylim(0, 110)
+                        
+                        for bar, pct in zip(bars, percentages):
+                            ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 2,
+                                   f'{pct:.1f}%', ha='center', va='bottom', fontweight='bold')
+                        
+                        ax.grid(True, alpha=0.3)
+                        plt.tight_layout()
+                        st.pyplot(fig)
+                    else:
+                        st.info("More data needed for guilt comparison")
+                
+                with col2:
+                    if stingy_responses:
+                        accept_count = len([r for r in stingy_responses if r == "Accept"])
+                        accept_pct = accept_count / len(stingy_responses) * 100
+                        
+                        fig, ax = plt.subplots(figsize=(8, 5))
+                        categories = ['Accept', 'Reject']
+                        percentages_vals = [accept_pct, 100 - accept_pct]
+                        colors = ['#3498db', '#e74c3c']
+                        
+                        bars = ax.bar(categories, percentages_vals, color=colors, alpha=0.8)
+                        ax.set_title("AT&T Responses to Stingy Offers", fontsize=14, fontweight='bold')
+                        ax.set_ylabel("Percentage (%)")
+                        ax.set_ylim(0, 110)
+                        
+                        for bar, pct in zip(bars, percentages_vals):
+                            ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 2,
+                                   f'{pct:.1f}%', ha='center', va='bottom', fontweight='bold')
+                        
+                        ax.grid(True, alpha=0.3)
+                        plt.tight_layout()
+                        st.pyplot(fig)
+                    else:
+                        st.info("No stingy offers data yet")
+                
+                # Game Theory Analysis
+                st.subheader("🧮 Theory vs Your Class Results")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if stingy_responses:
+                        accept_stingy_pct = len([r for r in stingy_responses if r == "Accept"]) / len(stingy_responses) * 100
+                        st.metric("AT&T Accept Stingy", f"{accept_stingy_pct:.1f}%", "Theory: 40%")
+                    else:
+                        st.metric("AT&T Accept Stingy", "N/A", "Theory: 40%")
+                
+                with col2:
+                    if guilty_offers:
+                        guilty_stingy_pct = len([o for o in guilty_offers if o == "Stingy"]) / len(guilty_offers) * 100
+                        st.metric("Guilty Choose Stingy", f"{guilty_stingy_pct:.1f}%", "Theory: ~43%")
+                    else:
+                        st.metric("Guilty Choose Stingy", "N/A", "Theory: ~43%")
+                
+                with col3:
+                    if innocent_offers:
+                        innocent_stingy_pct = len([o for o in innocent_offers if o == "Stingy"]) / len(innocent_offers) * 100
+                        st.metric("Innocent Choose Stingy", f"{innocent_stingy_pct:.1f}%", "Theory: 100%")
+                    else:
+                        st.metric("Innocent Choose Stingy", "N/A", "Theory: 100%")
+                
+                # Bayesian Insight
+                st.subheader("🔍 Bayesian Insight")
+                if stingy_responses:
+                    st.success(f"""
+                    **Key Discovery**: When you see a Stingy offer, the probability eBay is guilty is only ~12.5%!
+                    
+                    **Your Experience**: {len(stingy_responses)} stingy offers made, AT&T accepted {len([r for r in stingy_responses if r == "Accept"])} of them.
+                    
+                    **Why?** Most stingy offers come from innocent eBay players (forced to offer stingy), not guilty ones mixing strategies.
+                    """)
+                
+                st.info("🎓 **You've experienced strategic signaling and Bayesian updating in action!**")
         
         # Check if all matches completed for results display
         expected_players = db.reference("lawsuit_expected_players").get() or 0
