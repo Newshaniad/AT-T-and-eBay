@@ -238,25 +238,25 @@ if admin_password == "admin123":
                 results_data = []
                 for match_id, match_data in all_matches.items():
                     if "ebay_response" in match_data and "att_response" in match_data:
-                        # Calculate payoffs
+                        # Calculate payoffs with correct values
                         guilt = match_data["ebay_guilt"]
                         offer = match_data["ebay_response"]
                         response = match_data["att_response"]
                         
                         if guilt == "Guilty":
                             if offer == "Generous" and response == "Accept":
-                                ebay_payoff, att_payoff = -100, 100
+                                ebay_payoff, att_payoff = -200, 200
                             elif offer == "Stingy" and response == "Accept":
                                 ebay_payoff, att_payoff = -20, 20
-                            else:  # Stingy + Reject
-                                ebay_payoff, att_payoff = -200, 100
+                            else:  # Stingy + Reject (Trial)
+                                ebay_payoff, att_payoff = -320, 300
                         else:  # Innocent
                             if offer == "Generous" and response == "Accept":
-                                ebay_payoff, att_payoff = -80, 100
+                                ebay_payoff, att_payoff = 0, 0  # Shouldn't happen
                             elif offer == "Stingy" and response == "Accept":
-                                ebay_payoff, att_payoff = -10, 20
-                            else:  # Stingy + Reject
-                                ebay_payoff, att_payoff = 0, -100
+                                ebay_payoff, att_payoff = -20, 20
+                            else:  # Stingy + Reject (Trial)
+                                ebay_payoff, att_payoff = 0, -20
                         
                         results_data.append({
                             "Match_ID": match_id,
@@ -311,17 +311,50 @@ if (db.reference("lawsuit_expected_players").get() or 0) <= 0:
     st.info("⚠️ Game not configured yet. Admin needs to set expected number of players.")
     st.stop()
 
-# Game description
+# Game explanation
+st.header("📖 Simple Explanation of the Game")
+
 st.markdown("""
-### 🎭 The Legal Drama
+This is a **dynamic signaling game** between two players:
 
-**AT&T sues eBay for patent infringement.**
+🏢 **eBay** (the sender of the signal/offer)  
+📡 **AT&T** (the receiver, who decides whether to accept or reject the offer)
 
-- Sometimes eBay is **guilty**, sometimes **innocent** (25% chance of guilty)
-- eBay can make a **generous offer** or **stingy offer** to settle
-- If **generous**, AT&T automatically accepts (who wouldn't want more money?)
-- If **stingy**, AT&T can **accept** or **reject and go to court**
-- **Court costs both sides money** - lawyers are expensive!
+### 🎯 What's happening?
+
+1. **Nature decides** whether eBay is **guilty (25%)** or **innocent (75%)**
+2. **eBay makes a settlement offer** to AT&T:
+   - **Generous offer (G)**
+   - **Stingy offer (S)**
+3. **If eBay offers generous** → AT&T automatically accepts
+4. **If eBay offers stingy** → AT&T chooses to either:
+   - **Accept (A)** → no trial
+   - **Reject (R)** → go to court
+
+---
+
+### 💰 Payoff Matrix (eBay's payoff, AT&T's payoff):
+
+**If eBay is Guilty (25% probability):**
+- Generous → Accept: (-200, 200) *High cost for eBay*
+- Stingy → Accept: (-20, 20) *Mild cost for eBay*  
+- Stingy → Reject (Trial): (-320, 300) *Very costly for eBay*
+
+**If eBay is Innocent (75% probability):**
+- Generous → Not allowed *(Innocent can't signal guilt!)*
+- Stingy → Accept: (-20, 20) *Same as guilty case*
+- Stingy → Reject (Trial): (0, -20) *AT&T loses failed trial*
+
+### 🎮 Game Steps:
+
+**Step 1**: Player Registration - Enter your name  
+**Step 2**: Random Nature Draw - System assigns guilty/innocent (hidden from AT&T)  
+**Step 3**: eBay's Move - Choose settlement offer  
+**Step 4**: AT&T's Response - Accept or reject stingy offers  
+**Step 5**: Show Results - Reveal types, offers, and payoffs  
+**Step 6**: Summary Analysis - Class results vs game theory predictions
+
+---
 """)
 
 # Player registration
@@ -366,10 +399,10 @@ if name:
         # Assign role to balance teams
         if ebay_count < (expected_players // 2):
             role = "eBay"
-            # Assign guilt status (25% chance of guilty)
+            # Step 2: Random Nature Draw - Assign guilt status (25% chance of guilty, 75% innocent)
             is_guilty = random.random() < 0.25
             guilt_status = "Guilty" if is_guilty else "Innocent"
-            card_color = "🔴 Red Card" if is_guilty else "🔵 Blue Card"
+            card_color = "🔴 Red Card (Guilty)" if is_guilty else "🔵 Blue Card (Innocent)"
             
             player_ref.update({
                 "role": role,
@@ -389,9 +422,12 @@ if name:
     if role == "eBay":
         guilt_status = player_info["guilt_status"]
         card_color = player_info["card_color"]
-        st.success(f"🎴 You are **eBay** - {card_color} - You are **{guilt_status}**")
+        st.success(f"🏢 **You are eBay (the sender)**")
+        st.info(f"🎴 **Step 2 - Nature's Decision**: {card_color}")
+        st.write(f"**Your type is: {guilt_status}** (This information is private - AT&T doesn't know this)")
     else:
-        st.success(f"🏢 You are **AT&T**")
+        st.success(f"📡 **You are AT&T (the receiver)**")
+        st.info("🎴 You don't know whether eBay is guilty or innocent - you must infer from their offer!")
     
     # Matching system
     matches_ref = db.reference("lawsuit_matches")
@@ -471,18 +507,23 @@ if name:
     match_data = match_ref.get()
     
     if role == "eBay":
-        st.subheader("💼 eBay: Make Your Settlement Offer")
+        st.subheader("💼 Step 3: eBay's Move - Make Your Settlement Offer")
         
         if "ebay_response" not in match_data:
             guilt_status = match_data["ebay_guilt"]
             
+            st.write(f"**Reminder**: You are {guilt_status}")
+            
             if guilt_status == "Innocent":
-                st.warning("⚠️ **Rule**: As an innocent party, you cannot make a Generous offer (it would look suspicious!)")
+                st.warning("⚠️ **Game Rule**: Innocent eBay is forced to offer Stingy (to simplify the strategy set)")
+                st.info("💡 **Strategic Note**: If you could offer Generous, it might signal guilt!")
                 offer_options = ["Stingy"]
             else:  # Guilty
+                st.info("💰 **Your Choice**: As a guilty party, you can choose either offer type")
                 offer_options = ["Generous", "Stingy"]
             
-            offer = st.radio("Choose your settlement offer:", offer_options)
+            offer = st.radio("Choose your settlement offer:", offer_options, 
+                           help="Generous = High settlement amount, Stingy = Low settlement amount")
             
             if st.button("Submit Offer"):
                 match_ref.update({
@@ -501,7 +542,7 @@ if name:
                 st.rerun()
     
     elif role == "AT&T":
-        st.subheader("🏢 AT&T: Respond to eBay's Offer")
+        st.subheader("📡 Step 4: AT&T's Response - Accept or Reject")
         
         if "ebay_response" not in match_data:
             st.info("⏳ Waiting for eBay to make an offer...")
@@ -512,14 +553,18 @@ if name:
             ebay_offer = match_data["ebay_response"]
             ebay_player = match_data["ebay_player"]
             
-            st.info(f"💼 {ebay_player} offered a **{ebay_offer}** settlement")
+            st.info(f"💼 **{ebay_player} offered a {ebay_offer} settlement**")
             
             if ebay_offer == "Generous":
-                st.success("💰 It's generous! You automatically Accept!")
+                st.success("💰 **Game Rule**: Generous offers are automatically accepted!")
+                st.write("🤔 **Think**: What does this generous offer tell you about eBay's type?")
                 response = "Accept"
                 auto_accept = True
             else:  # Stingy
-                response = st.radio("What do you do?", ["Accept", "Reject (Go to Court)"])
+                st.write("🤔 **Strategic Decision**: You received a stingy offer. What should you infer?")
+                st.info("💡 **Think**: Could this be from a guilty or innocent eBay? What are the probabilities?")
+                response = st.radio("What do you do?", ["Accept", "Reject (Go to Court)"],
+                                  help="Accept = Take the low settlement, Reject = Go to expensive trial")
                 auto_accept = False
             
             if st.button("Submit Response") or auto_accept:
@@ -535,7 +580,7 @@ if name:
     
     # Show results when both completed
     if "ebay_response" in match_data and "att_response" in match_data:
-        st.header("🎯 Match Results")
+        st.header("🎯 Step 5: Results - The Truth is Revealed!")
         
         ebay_player = match_data["ebay_player"]
         att_player = match_data["att_player"]
@@ -543,30 +588,52 @@ if name:
         offer = match_data["ebay_response"]
         response = match_data["att_response"]
         
-        # Calculate payoffs
+        # Show the revelation
+        st.subheader("🔍 What Really Happened:")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.info(f"**eBay's Type**\n{guilt}")
+        with col2:
+            st.info(f"**eBay's Offer**\n{offer}")
+        with col3:
+            st.info(f"**AT&T's Response**\n{response}")
+        
+        # Calculate payoffs based on correct payoff matrix
         if guilt == "Guilty":
             if offer == "Generous" and response == "Accept":
-                ebay_payoff, att_payoff = -100, 100
+                ebay_payoff, att_payoff = -200, 200
             elif offer == "Stingy" and response == "Accept":
                 ebay_payoff, att_payoff = -20, 20
-            else:  # Stingy + Reject
-                ebay_payoff, att_payoff = -200, 100
+            else:  # Stingy + Reject (Trial)
+                ebay_payoff, att_payoff = -320, 300
         else:  # Innocent
             if offer == "Generous" and response == "Accept":
-                ebay_payoff, att_payoff = -80, 100
+                # This shouldn't happen since innocent can't offer generous
+                ebay_payoff, att_payoff = 0, 0  
             elif offer == "Stingy" and response == "Accept":
-                ebay_payoff, att_payoff = -10, 20
-            else:  # Stingy + Reject
-                ebay_payoff, att_payoff = 0, -100
+                ebay_payoff, att_payoff = -20, 20
+            else:  # Stingy + Reject (Trial)
+                ebay_payoff, att_payoff = 0, -20
         
-        st.success(f"**Final Outcome:**")
-        st.write(f"- **eBay** ({ebay_player}): {guilt}, offered {offer} → Payoff: **{ebay_payoff}**")
-        st.write(f"- **AT&T** ({att_player}): {response} → Payoff: **{att_payoff}**")
+        # Show payoffs with explanation
+        st.subheader("💰 Final Payoffs:")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.success(f"**eBay ({ebay_player})**\nPayoff: {ebay_payoff}")
+        with col2:
+            st.success(f"**AT&T ({att_player})**\nPayoff: {att_payoff}")
         
+        # Outcome explanation
         if response == "Reject":
-            st.write("⚖️ **Went to court!**")
+            st.write("⚖️ **Outcome**: Went to court! Both sides paid legal fees.")
+            if guilt == "Guilty":
+                st.write("🔍 **Court Result**: eBay was found guilty and paid damages plus legal costs")
+            else:
+                st.write("🔍 **Court Result**: eBay was found innocent - AT&T paid all legal costs!")
         else:
-            st.write("🤝 **Settled out of court!**")
+            st.write("🤝 **Outcome**: Settled out of court - no legal fees!")
+            st.write(f"💸 **Settlement**: AT&T accepted the {offer.lower()} offer")
         
         st.balloons()
         st.success("✅ Your match is complete! Thank you for playing.")
@@ -582,59 +649,142 @@ if name:
         expected_matches = expected_players // 2
         
         if completed_matches >= expected_matches:
-            st.header("📊 Game Summary - All Matches Complete!")
+            st.header("📊 Step 6: Summary Analysis - Class Results vs Game Theory")
             
             # Collect all results
             ebay_offers = []
             att_responses = []
             guilt_statuses = []
+            guilty_offers = []
+            innocent_offers = []
+            stingy_responses = []
             
             for match_data in all_matches.values():
                 if "ebay_response" in match_data and "att_response" in match_data:
-                    ebay_offers.append(match_data["ebay_response"])
-                    att_responses.append(match_data["att_response"])
-                    guilt_statuses.append(match_data["ebay_guilt"])
+                    guilt = match_data["ebay_guilt"]
+                    offer = match_data["ebay_response"]
+                    response = match_data["att_response"]
+                    
+                    ebay_offers.append(offer)
+                    att_responses.append(response)
+                    guilt_statuses.append(guilt)
+                    
+                    # Separate by guilt status
+                    if guilt == "Guilty":
+                        guilty_offers.append(offer)
+                    else:
+                        innocent_offers.append(offer)
+                    
+                    # AT&T responses to stingy offers only
+                    if offer == "Stingy":
+                        stingy_responses.append(response)
             
-            # Show final charts
-            col1, col2 = st.columns(2)
-            with col1:
-                plot_enhanced_percentage_bar(ebay_offers, ["Generous", "Stingy"], "Final: eBay Settlement Offers", "eBay")
-                plot_enhanced_percentage_bar(guilt_statuses, ["Guilty", "Innocent"], "Final: eBay Guilt Distribution", "eBay")
-            
-            with col2:
-                plot_enhanced_percentage_bar(att_responses, ["Accept", "Reject"], "Final: AT&T Responses", "AT&T")
-                
-                # Strategy analysis
-                strategies = []
-                for match_data in all_matches.values():
-                    if "ebay_response" in match_data and "att_response" in match_data:
-                        guilt = match_data["ebay_guilt"]
-                        offer = match_data["ebay_response"]
-                        if guilt == "Innocent" and offer == "Stingy":
-                            strategies.append("Separating")
-                        elif guilt == "Guilty" and offer == "Generous":
-                            strategies.append("Separating")
-                        else:
-                            strategies.append("Pooling")
-                
-                if strategies:
-                    plot_enhanced_percentage_bar(strategies, ["Pooling", "Separating"], "Final: eBay Strategy Analysis", "eBay")
-            
-            # Show theoretical comparison
-            st.subheader("🧮 Theory vs Reality")
-            pooling_count = len([s for s in strategies if s == "Pooling"])
-            pooling_pct = pooling_count / len(strategies) * 100 if strategies else 0
-            
-            accept_count = len([r for r in att_responses if r == "Accept"])
-            accept_pct = accept_count / len(att_responses) * 100 if att_responses else 0
+            # Show key visualization as requested
+            st.subheader("🎯 Key Strategic Analysis")
             
             col1, col2 = st.columns(2)
             with col1:
-                st.metric("Your Class: eBay Pooling", f"{pooling_pct:.1f}%", "Theory: 42.9%")
-            with col2:
-                st.metric("Your Class: AT&T Accept Stingy", f"{accept_pct:.1f}%", "Theory: 40.0%")
+                # % of guilty vs innocent choosing Stingy
+                if guilty_offers and innocent_offers:
+                    guilty_stingy = len([o for o in guilty_offers if o == "Stingy"])
+                    innocent_stingy = len([o for o in innocent_offers if o == "Stingy"])
+                    
+                    guilty_stingy_pct = guilty_stingy / len(guilty_offers) * 100
+                    innocent_stingy_pct = innocent_stingy / len(innocent_offers) * 100
+                    
+                    fig, ax = plt.subplots(figsize=(8, 5))
+                    categories = ['Guilty eBay', 'Innocent eBay']
+                    percentages = [guilty_stingy_pct, innocent_stingy_pct]
+                    colors = ['#e74c3c', '#2ecc71']
+                    
+                    bars = ax.bar(categories, percentages, color=colors, alpha=0.8)
+                    ax.set_title("% Choosing Stingy Offer by eBay Type", fontsize=14, fontweight='bold')
+                    ax.set_ylabel("Percentage (%)")
+                    ax.set_ylim(0, 110)
+                    
+                    # Add value labels
+                    for bar, pct in zip(bars, percentages):
+                        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 2,
+                               f'{pct:.1f}%', ha='center', va='bottom', fontweight='bold')
+                    
+                    ax.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                else:
+                    st.info("Need both guilty and innocent players to show this analysis")
             
-            st.success("🎉 **Game Complete!** You've experienced Nash Equilibrium and game theory in action!")
+            with col2:
+                # % of AT&T accepting stingy offers
+                if stingy_responses:
+                    accept_stingy = len([r for r in stingy_responses if r == "Accept"])
+                    accept_pct = accept_stingy / len(stingy_responses) * 100
+                    
+                    fig, ax = plt.subplots(figsize=(8, 5))
+                    categories = ['Accept', 'Reject']
+                    accept_count = len([r for r in stingy_responses if r == "Accept"])
+                    reject_count = len([r for r in stingy_responses if r == "Reject"])
+                    
+                    values = [accept_count, reject_count]
+                    percentages_vals = [v/len(stingy_responses)*100 for v in values]
+                    colors = ['#3498db', '#e74c3c']
+                    
+                    bars = ax.bar(categories, percentages_vals, color=colors, alpha=0.8)
+                    ax.set_title("AT&T Responses to Stingy Offers", fontsize=14, fontweight='bold')
+                    ax.set_ylabel("Percentage (%)")
+                    ax.set_ylim(0, 110)
+                    
+                    # Add value labels
+                    for bar, pct in zip(bars, percentages_vals):
+                        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 2,
+                               f'{pct:.1f}%', ha='center', va='bottom', fontweight='bold')
+                    
+                    ax.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                else:
+                    st.info("No stingy offers made yet")
+            
+            # Game Theory Analysis
+            st.subheader("🧮 Game Theory Predictions vs Your Class")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if stingy_responses:
+                    accept_stingy_pct = len([r for r in stingy_responses if r == "Accept"]) / len(stingy_responses) * 100
+                    st.metric("AT&T Accept Stingy Offers", f"{accept_stingy_pct:.1f}%", "Theory: 40%")
+                else:
+                    st.metric("AT&T Accept Stingy Offers", "N/A", "Theory: 40%")
+            
+            with col2:
+                if guilty_offers:
+                    guilty_stingy_pct = len([o for o in guilty_offers if o == "Stingy"]) / len(guilty_offers) * 100
+                    st.metric("Guilty eBay Choose Stingy", f"{guilty_stingy_pct:.1f}%", "Theory: ~43%")
+                else:
+                    st.metric("Guilty eBay Choose Stingy", "N/A", "Theory: ~43%")
+            
+            with col3:
+                if innocent_offers:
+                    innocent_stingy_pct = len([o for o in innocent_offers if o == "Stingy"]) / len(innocent_offers) * 100
+                    st.metric("Innocent eBay Choose Stingy", f"{innocent_stingy_pct:.1f}%", "Theory: 100%")
+                else:
+                    st.metric("Innocent eBay Choose Stingy", "N/A", "Theory: 100%")
+            
+            # Bayesian Analysis
+            st.subheader("🔍 Bayesian Analysis")
+            if stingy_responses:
+                st.info(f"""
+                **Key Insight**: When you see a **Stingy** offer, what's the probability eBay is guilty?
+                
+                **Your Class Results**: 
+                - {len(stingy_responses)} stingy offers were made
+                - AT&T accepted {len([r for r in stingy_responses if r == "Accept"])} of them ({accept_stingy_pct:.1f}%)
+                
+                **Theoretical Prediction**: 
+                - P(Guilty | Stingy Offer) ≈ 12.5% 
+                - Most stingy offers actually come from innocent parties!
+                """)
+            
+            st.success("🎉 **Dynamic Signaling Game Complete!** You've experienced Nash Equilibrium, Bayesian updating, and strategic signaling in action!")
 
 # Show game status
 st.sidebar.header("🎮 Game Status")
