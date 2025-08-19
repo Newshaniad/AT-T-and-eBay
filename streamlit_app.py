@@ -79,21 +79,38 @@ admin_password = st.text_input("Admin Password:", type="password")
 if admin_password == "admin123":
     st.header("🎓 Admin Control Panel")
     
-    # Get real-time data
-    all_players = db.reference("lawsuit_players").get() or {}
-    all_matches = db.reference("lawsuit_matches").get() or {}
-    expected_players = db.reference("lawsuit_expected_players").get() or 0
+    # Get real-time data with safe handling
+    try:
+        all_players_raw = db.reference("lawsuit_players").get()
+        all_players = all_players_raw if isinstance(all_players_raw, dict) else {}
+        
+        all_matches_raw = db.reference("lawsuit_matches").get()
+        all_matches = all_matches_raw if isinstance(all_matches_raw, dict) else {}
+        
+        expected_players = db.reference("lawsuit_expected_players").get() or 0
+    except Exception as e:
+        st.error("Error connecting to database. Please refresh the page.")
+        all_players = {}
+        all_matches = {}
+        expected_players = 0
     
     # Calculate statistics
-    total_registered = len(all_players) if all_players else 0
-    ebay_players = [p for p in all_players.values() if p and p.get("role") == "eBay"] if all_players else []
-    att_players = [p for p in all_players.values() if p and p.get("role") == "AT&T"] if all_players else []
+    total_registered = len(all_players)
+    ebay_players = []
+    att_players = []
+    
+    for player in all_players.values():
+        if player and isinstance(player, dict):
+            role = player.get("role")
+            if role == "eBay":
+                ebay_players.append(player)
+            elif role == "AT&T":
+                att_players.append(player)
     
     completed_matches = 0
-    if all_matches:
-        for match_data in all_matches.values():
-            if match_data and "ebay_response" in match_data and "att_response" in match_data:
-                completed_matches += 1
+    for match_data in all_matches.values():
+        if match_data and isinstance(match_data, dict) and "ebay_response" in match_data and "att_response" in match_data:
+            completed_matches += 1
     
     # Live Statistics Dashboard
     st.subheader("📊 Live Game Statistics")
@@ -114,7 +131,7 @@ if admin_password == "admin123":
     with col2:
         st.metric("Completed Matches", completed_matches)
     with col3:
-        guilty_count = len([p for p in ebay_players if p and p.get("guilt_status") == "Guilty"])
+        guilty_count = len([p for p in ebay_players if isinstance(p, dict) and p.get("guilt_status") == "Guilty"])
         st.metric("Guilty eBay Players", guilty_count)
     
     # Player activity monitor
@@ -169,14 +186,14 @@ if admin_password == "admin123":
     # Live analytics
     st.subheader("📈 Live Game Analytics")
     
-    if completed_matches > 0 and all_matches:
+    if completed_matches > 0:
         # Collect data for charts
         ebay_offers = []
         att_responses = []
         guilt_statuses = []
         
         for match_data in all_matches.values():
-            if match_data and "ebay_response" in match_data and "att_response" in match_data:
+            if match_data and isinstance(match_data, dict) and "ebay_response" in match_data and "att_response" in match_data:
                 ebay_offers.append(match_data["ebay_response"])
                 att_responses.append(match_data["att_response"])
                 guilt_statuses.append(match_data["ebay_guilt"])
@@ -192,7 +209,7 @@ if admin_password == "admin123":
             # Strategy analysis
             strategies = []
             for match_data in all_matches.values():
-                if match_data and "ebay_response" in match_data and "att_response" in match_data:
+                if match_data and isinstance(match_data, dict) and "ebay_response" in match_data and "att_response" in match_data:
                     guilt = match_data["ebay_guilt"]
                     offer = match_data["ebay_response"]
                     if guilt == "Innocent" and offer == "Stingy":
@@ -235,7 +252,7 @@ if admin_password == "admin123":
     
     with col1:
         if st.button("📊 Export Results (CSV)"):
-            if completed_matches > 0 and all_matches:
+            if completed_matches > 0:
                 results_data = []
                 for match_id, match_data in all_matches.items():
                     if "ebay_response" in match_data and "att_response" in match_data:
