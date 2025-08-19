@@ -85,14 +85,15 @@ if admin_password == "admin123":
     expected_players = db.reference("lawsuit_expected_players").get() or 0
     
     # Calculate statistics
-    total_registered = len(all_players)
-    ebay_players = [p for p in all_players.values() if p.get("role") == "eBay"]
-    att_players = [p for p in all_players.values() if p.get("role") == "AT&T"]
+    total_registered = len(all_players) if all_players else 0
+    ebay_players = [p for p in all_players.values() if p and p.get("role") == "eBay"] if all_players else []
+    att_players = [p for p in all_players.values() if p and p.get("role") == "AT&T"] if all_players else []
     
     completed_matches = 0
-    for match_data in all_matches.values():
-        if "ebay_response" in match_data and "att_response" in match_data:
-            completed_matches += 1
+    if all_matches:
+        for match_data in all_matches.values():
+            if match_data and "ebay_response" in match_data and "att_response" in match_data:
+                completed_matches += 1
     
     # Live Statistics Dashboard
     st.subheader("📊 Live Game Statistics")
@@ -113,7 +114,7 @@ if admin_password == "admin123":
     with col2:
         st.metric("Completed Matches", completed_matches)
     with col3:
-        guilty_count = len([p for p in ebay_players if p.get("guilt_status") == "Guilty"])
+        guilty_count = len([p for p in ebay_players if p and p.get("guilt_status") == "Guilty"])
         st.metric("Guilty eBay Players", guilty_count)
     
     # Player activity monitor
@@ -168,14 +169,14 @@ if admin_password == "admin123":
     # Live analytics
     st.subheader("📈 Live Game Analytics")
     
-    if completed_matches > 0:
+    if completed_matches > 0 and all_matches:
         # Collect data for charts
         ebay_offers = []
         att_responses = []
         guilt_statuses = []
         
         for match_data in all_matches.values():
-            if "ebay_response" in match_data and "att_response" in match_data:
+            if match_data and "ebay_response" in match_data and "att_response" in match_data:
                 ebay_offers.append(match_data["ebay_response"])
                 att_responses.append(match_data["att_response"])
                 guilt_statuses.append(match_data["ebay_guilt"])
@@ -191,7 +192,7 @@ if admin_password == "admin123":
             # Strategy analysis
             strategies = []
             for match_data in all_matches.values():
-                if "ebay_response" in match_data and "att_response" in match_data:
+                if match_data and "ebay_response" in match_data and "att_response" in match_data:
                     guilt = match_data["ebay_guilt"]
                     offer = match_data["ebay_response"]
                     if guilt == "Innocent" and offer == "Stingy":
@@ -234,7 +235,7 @@ if admin_password == "admin123":
     
     with col1:
         if st.button("📊 Export Results (CSV)"):
-            if completed_matches > 0:
+            if completed_matches > 0 and all_matches:
                 results_data = []
                 for match_id, match_data in all_matches.items():
                     if "ebay_response" in match_data and "att_response" in match_data:
