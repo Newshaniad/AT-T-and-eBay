@@ -9,13 +9,6 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 import base64
 from datetime import datetime
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
-import tempfile
-import os
 
 st.set_page_config(page_title="⚖️ eBay vs AT&T Classroom Game")
 
@@ -44,85 +37,23 @@ if 'game_phase' not in st.session_state:
 if 'current_round' not in st.session_state:
     st.session_state.current_round = 1
 
-# Enhanced PDF generation function
-def create_comprehensive_game_report():
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
-    styles = getSampleStyleSheet()
-    story = []
+# CSV export function (simplified replacement for PDF)
+def create_game_data_csv():
+    """Create a CSV export of all game data"""
+    all_data = []
     
-    # Title
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Title'],
-        fontSize=24,
-        textColor=colors.darkblue,
-        spaceAfter=30
-    )
-    story.append(Paragraph("⚖️ AT&T vs eBay Lawsuit Game - Complete Results", title_style))
-    story.append(Spacer(1, 20))
-    
-    # Get all game data
+    # Get all player data
     players_data = db.reference("classroom_players").get() or {}
-    current_round = st.session_state.current_round
     
-    # Summary section
-    story.append(Paragraph(f"<b>Game Summary</b>", styles['Heading2']))
-    story.append(Paragraph(f"Current Round: {current_round}", styles['Normal']))
-    story.append(Paragraph(f"Total Players: {len(players_data)}", styles['Normal']))
-    ebay_count = len([p for p in players_data.values() if p.get("role") == "eBay"])
-    att_count = len([p for p in players_data.values() if p.get("role") == "AT&T"])
-    story.append(Paragraph(f"eBay Players: {ebay_count}", styles['Normal']))
-    story.append(Paragraph(f"AT&T Players: {att_count}", styles['Normal']))
-    story.append(Spacer(1, 20))
-    
-    # Player roster
-    story.append(Paragraph("<b>Player Roster</b>", styles['Heading2']))
-    player_table_data = [["Player Name", "Role", "Status", "Card Color"]]
-    
-    for name, data in players_data.items():
-        role = data.get("role", "Unknown")
-        guilt_status = data.get("guilt_status", "N/A")
-        card_color = data.get("card_color", "N/A")
-        player_table_data.append([name, role, guilt_status, card_color])
-    
-    player_table = Table(player_table_data, colWidths=[2*inch, 1.5*inch, 1.5*inch, 2*inch])
-    player_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('FONTSIZE', (0, 1), (-1, -1), 8),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-    ]))
-    story.append(player_table)
-    story.append(Spacer(1, 30))
-    
-    # Round-by-round results
-    story.append(Paragraph("<b>Round-by-Round Results</b>", styles['Heading2']))
-    
-    all_results = []
-    total_payoffs = {"eBay": 0, "AT&T": 0}
-    
-    for round_num in range(1, current_round + 1):
+    # Get all round data
+    for round_num in range(1, st.session_state.current_round + 1):
         round_data = db.reference(f"classroom_round_{round_num}").get() or {}
-        if not round_data:
-            continue
-            
-        story.append(Paragraph(f"<b>Round {round_num}</b>", styles['Heading3']))
-        
-        # Process round results
-        ebay_players = {name: data for name, data in round_data.items() if data.get("role") == "eBay"}
         att_responses = {name: data for name, data in round_data.items() if data.get("role") == "AT&T"}
         
-        round_results = []
         for att_name, att_data in att_responses.items():
             ebay_name = att_data.get("responding_to")
-            if ebay_name in ebay_players:
-                ebay_data = ebay_players[ebay_name]
+            if ebay_name in round_data:
+                ebay_data = round_data[ebay_name]
                 
                 guilt = ebay_data["guilt_status"]
                 offer = ebay_data["offer"]
@@ -144,91 +75,19 @@ def create_comprehensive_game_report():
                     else:  # Stingy + Reject
                         ebay_payoff, att_payoff = 0, -100
                 
-                total_payoffs["eBay"] += ebay_payoff
-                total_payoffs["AT&T"] += att_payoff
-                
-                round_results.append([
-                    ebay_name, att_name, guilt, offer, response, 
-                    str(ebay_payoff), str(att_payoff)
-                ])
-                all_results.append({
-                    "round": round_num,
-                    "guilt": guilt,
-                    "offer": offer,
-                    "response": response,
-                    "ebay_payoff": ebay_payoff,
-                    "att_payoff": att_payoff
+                all_data.append({
+                    "Round": round_num,
+                    "eBay_Player": ebay_name,
+                    "AT&T_Player": att_name,
+                    "eBay_Status": guilt,
+                    "Offer": offer,
+                    "Response": response,
+                    "eBay_Payoff": ebay_payoff,
+                    "AT&T_Payoff": att_payoff,
+                    "Timestamp": att_data.get("timestamp", "")
                 })
-        
-        if round_results:
-            round_table_data = [["eBay Player", "AT&T Player", "eBay Status", "Offer", "Response", "eBay Payoff", "AT&T Payoff"]]
-            round_table_data.extend(round_results)
-            
-            round_table = Table(round_table_data, colWidths=[1*inch, 1*inch, 0.8*inch, 0.8*inch, 0.8*inch, 0.8*inch, 0.8*inch])
-            round_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 8),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                ('FONTSIZE', (0, 1), (-1, -1), 7),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black)
-            ]))
-            story.append(round_table)
-        else:
-            story.append(Paragraph("No matches in this round.", styles['Normal']))
-        story.append(Spacer(1, 15))
     
-    # Overall statistics
-    story.append(Paragraph("<b>Overall Statistics</b>", styles['Heading2']))
-    if all_results:
-        total_games = len(all_results)
-        generous_offers = len([r for r in all_results if r["offer"] == "Generous"])
-        stingy_offers = len([r for r in all_results if r["offer"] == "Stingy"])
-        accepted_offers = len([r for r in all_results if r["response"] == "Accept"])
-        court_cases = len([r for r in all_results if r["response"] == "Reject"])
-        guilty_cases = len([r for r in all_results if r["guilt"] == "Guilty"])
-        innocent_cases = len([r for r in all_results if r["guilt"] == "Innocent"])
-        
-        stats_data = [
-            ["Metric", "Count", "Percentage"],
-            ["Total Games", str(total_games), "100%"],
-            ["Generous Offers", str(generous_offers), f"{generous_offers/total_games*100:.1f}%"],
-            ["Stingy Offers", str(stingy_offers), f"{stingy_offers/total_games*100:.1f}%"],
-            ["Accepted Settlements", str(accepted_offers), f"{accepted_offers/total_games*100:.1f}%"],
-            ["Went to Court", str(court_cases), f"{court_cases/total_games*100:.1f}%"],
-            ["Guilty Cases", str(guilty_cases), f"{guilty_cases/total_games*100:.1f}%"],
-            ["Innocent Cases", str(innocent_cases), f"{innocent_cases/total_games*100:.1f}%"]
-        ]
-        
-        stats_table = Table(stats_data, colWidths=[2.5*inch, 1*inch, 1.5*inch])
-        stats_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        story.append(stats_table)
-        story.append(Spacer(1, 20))
-        
-        # Average payoffs
-        avg_ebay = total_payoffs["eBay"] / total_games if total_games > 0 else 0
-        avg_att = total_payoffs["AT&T"] / total_games if total_games > 0 else 0
-        story.append(Paragraph(f"Average eBay Payoff: {avg_ebay:.1f}", styles['Normal']))
-        story.append(Paragraph(f"Average AT&T Payoff: {avg_att:.1f}", styles['Normal']))
-        story.append(Paragraph("Theoretical eBay Payoff: -56.0", styles['Normal']))
-        story.append(Paragraph("Theoretical AT&T Payoff: 45.7", styles['Normal']))
-    
-    story.append(Spacer(1, 20))
-    story.append(Paragraph("✅ Report generated automatically", styles['Normal']))
-    
-    # Build PDF
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
+    return pd.DataFrame(all_data)
 
 # Admin section with comprehensive dashboard
 admin_password = st.text_input("Teacher Password:", type="password")
@@ -462,59 +321,28 @@ if admin_password == "admin123":
     # Enhanced data management
     st.subheader("📄 Reports & Data Management")
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
-        # PDF Download
-        if st.button("📄 Download Complete Game Report (PDF)"):
-            with st.spinner("Generating comprehensive PDF report..."):
-                try:
-                    pdf_buffer = create_comprehensive_game_report()
-                    b64 = base64.b64encode(pdf_buffer.read()).decode()
-                    href = f'<a href="data:application/pdf;base64,{b64}" download="lawsuit_game_results.pdf">Click here to download Complete Game Report</a>'
-                    st.markdown(href, unsafe_allow_html=True)
-                    st.success("✅ Complete game report generated successfully!")
-                except Exception as e:
-                    st.error(f"Error generating PDF: {str(e)}")
-    
-    with col2:
-        # Excel export
-        if st.button("📊 Export Data to Excel"):
+        # CSV Download
+        if st.button("📊 Download Game Data (CSV)"):
             try:
-                # Prepare data for Excel
-                excel_data = []
-                for round_num in range(1, st.session_state.current_round + 1):
-                    round_data = db.reference(f"classroom_round_{round_num}").get() or {}
-                    att_responses = {name: data for name, data in round_data.items() if data.get("role") == "AT&T"}
-                    
-                    for att_name, att_data in att_responses.items():
-                        ebay_name = att_data.get("responding_to")
-                        if ebay_name in round_data:
-                            ebay_data = round_data[ebay_name]
-                            excel_data.append({
-                                "Round": round_num,
-                                "eBay_Player": ebay_name,
-                                "ATT_Player": att_name,
-                                "eBay_Status": ebay_data["guilt_status"],
-                                "Offer": ebay_data["offer"],
-                                "Response": att_data["response"],
-                                "Timestamp": att_data.get("timestamp", "")
-                            })
-                
-                if excel_data:
-                    df = pd.DataFrame(excel_data)
-                    excel_buffer = BytesIO()
-                    df.to_excel(excel_buffer, index=False)
-                    excel_buffer.seek(0)
-                    b64 = base64.b64encode(excel_buffer.read()).decode()
-                    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="lawsuit_game_data.xlsx">Click here to download Excel file</a>'
+                df = create_game_data_csv()
+                if not df.empty:
+                    csv = df.to_csv(index=False)
+                    b64 = base64.b64encode(csv.encode()).decode()
+                    href = f'<a href="data:file/csv;base64,{b64}" download="lawsuit_game_data.csv">Click here to download CSV file</a>'
                     st.markdown(href, unsafe_allow_html=True)
-                    st.success("✅ Excel file generated successfully!")
+                    st.success("✅ CSV file generated successfully!")
+                    
+                    # Show preview
+                    st.subheader("📋 Data Preview")
+                    st.dataframe(df.head(10))
                 else:
                     st.warning("No data available to export.")
             except Exception as e:
-                st.error(f"Error generating Excel file: {str(e)}")
+                st.error(f"Error generating CSV file: {str(e)}")
     
-    with col3:
+    with col2:
         # Clear data
         if st.button("🗑️ Clear All Game Data"):
             for i in range(1, 21):  # Clear up to 20 rounds
